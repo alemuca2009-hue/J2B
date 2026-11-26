@@ -134,6 +134,55 @@ def build(path: str | Path) -> Path:
             }
         ),
         "data/testmod/worldgen/configured_feature/ruby_tree.json": json.dumps({"type": "minecraft:tree", "config": {}}),
+        # Sound: one plain definition with two variants, one that points at
+        # another *event* (no Bedrock form) and one on a Java category Bedrock
+        # does not have.
+        "assets/testmod/sounds.json": json.dumps(
+            {
+                "block.ruby_ore.chime": {
+                    "category": "block",
+                    "subtitle": "subtitles.testmod.chime",
+                    "sounds": [
+                        "testmod:block/ruby_ore_chime",
+                        {
+                            "name": "testmod:block/ruby_ore_chime2",
+                            "volume": 0.7,
+                            "pitch": 1.2,
+                            "stream": True,
+                            "weight": 3,
+                        },
+                    ],
+                },
+                "entity.ruby_golem.step": {
+                    "category": "hostile",
+                    "sounds": [{"type": "event", "name": "minecraft:entity.iron_golem.step"}],
+                },
+                "ui.ruby_click": {"category": "master", "sounds": ["testmod:ui/ruby_click"]},
+            },
+            indent=2,
+        ),
+        # Rotated *and* rescaled about an off-centre origin: the case where a
+        # dropped rescale shows up as a part twice its authored size.
+        "assets/testmod/blockstates/ruby_gear.json": json.dumps(
+            {"variants": {"": {"model": "testmod:block/ruby_gear"}}}
+        ),
+        "assets/testmod/models/block/ruby_gear.json": json.dumps(
+            {
+                "textures": {"gear": "testmod:block/ruby_ore"},
+                "elements": [
+                    {
+                        "from": [2, 4, 2],
+                        "to": [14, 12, 10],
+                        "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 22.5, "rescale": 0.5},
+                        "faces": {
+                            "north": {"texture": "#gear", "uv": [0, 0, 12, 8]},
+                            "south": {"texture": "#gear", "uv": [0, 0, 12, 8]},
+                            "up": {"texture": "#gear", "uv": [0, 8, 12, 12]},
+                        },
+                    }
+                ],
+            }
+        ),
         "testmod.mixins.json": json.dumps({"required": True, "package": "com.test.mixin", "mixins": ["FooMixin"]}),
     }
 
@@ -147,6 +196,14 @@ def build(path: str | Path) -> Path:
             "assets/testmod/textures/item/ruby_pickaxe.png",
         ):
             archive.writestr(texture, png)
+        # A real OGG is megabytes; the converter copies bytes and never decodes
+        # them, so a four-byte header is enough to prove the file travels.
+        for sound in (
+            "assets/testmod/sounds/block/ruby_ore_chime.ogg",
+            "assets/testmod/sounds/block/ruby_ore_chime2.ogg",
+            "assets/testmod/sounds/ui/ruby_click.ogg",
+        ):
+            archive.writestr(sound, b"OggS")
         # Class files only carry names; the scanner must treat them as hints.
         for cls in ("com/test/FooScreen.class", "com/test/FooCommand.class", "com/test/FooKeyMapping.class"):
             archive.writestr(cls, b"\xca\xfe\xba\xbe" + b"\x00" * 64)

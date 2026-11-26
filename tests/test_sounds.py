@@ -31,6 +31,10 @@ def _jar_with_sounds(path: Path, extra_writes: dict[str, bytes]) -> Path:
     base = build_fixture(path.with_suffix(".base.jar"))
     with zipfile.ZipFile(base) as source, zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as target:
         for item in source.infolist():
+            if item.filename in extra_writes:
+                # A test's own sounds.json replaces the fixture's, exactly as a
+                # real mod ships one file per namespace.
+                continue
             target.writestr(item, source.read(item.filename))
         for name, content in extra_writes.items():
             target.writestr(name, content)

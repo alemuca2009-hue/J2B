@@ -44,12 +44,55 @@ class ConversionFixture(unittest.TestCase):
     # -- scanning ---------------------------------------------------------
     def test_scan_finds_each_kind(self) -> None:
         kinds = {feature.kind for feature in self.result.features}
-        self.assertEqual(kinds, {"block", "item", "recipe", "entity", "worldgen", "gui", "mechanic"})
+        self.assertEqual(kinds, {"block", "item", "recipe", "entity", "worldgen", "gui", "mechanic", "sound"})
 
     def test_metadata_read(self) -> None:
         self.assertEqual(self.result.mod.mod_id, "testmod")
         self.assertEqual(self.result.mod.loader, "fabric")
         self.assertEqual(self.result.mod.version, "1.0.0")
+
+    # -- sound ------------------------------------------------------------
+    def test_sound_definitions_name_files_that_exist(self) -> None:
+        rp = self.result.packs.rp
+        document = json.loads((rp / "sounds" / "sound_definitions.json").read_text())
+        definitions = document["sound_definitions"]
+        # Java's dotted event names carry over; only the namespace marker moves.
+        self.assertIn("testmod.block.ruby_ore.chime", definitions)
+        for variant in definitions["testmod.block.ruby_ore.chime"]["sounds"]:
+            self.assertTrue((rp / f"{variant['name']}.ogg").is_file(), variant["name"])
+
+    def test_sound_variants_keep_volume_pitch_weight_and_stream(self) -> None:
+        rp = self.result.packs.rp
+        definitions = json.loads((rp / "sounds" / "sound_definitions.json").read_text())["sound_definitions"]
+        quiet = definitions["testmod.block.ruby_ore.chime"]["sounds"][1]
+        self.assertEqual(quiet["volume"], 0.7)
+        self.assertEqual(quiet["pitch"], 1.2)
+        self.assertEqual(quiet["weight"], 3)
+        self.assertTrue(quiet["stream"])
+
+    def test_java_categories_outside_bedrocks_enum_are_folded(self) -> None:
+        rp = self.result.packs.rp
+        definitions = json.loads((rp / "sounds" / "sound_definitions.json").read_text())["sound_definitions"]
+        # Java's `master` is Bedrock's `neutral`; writing `master` fails the schema.
+        self.assertEqual(definitions["testmod.ui.ruby_click"]["category"], "neutral")
+        self.assertEqual(definitions["testmod.block.ruby_ore.chime"]["category"], "block")
+
+    def test_event_only_entries_are_reported_not_written(self) -> None:
+        rp = self.result.packs.rp
+        definitions = json.loads((rp / "sounds" / "sound_definitions.json").read_text())["sound_definitions"]
+        self.assertNotIn("testmod.entity.ruby_golem.step", definitions)
+        feature = self.by_id["testmod:sound:sounds"]
+        self.assertTrue(any("entity.ruby_golem.step" in line for line in feature.limitations))
+
+    # -- rescale ----------------------------------------------------------
+    def test_rescaled_element_is_halved_not_dropped(self) -> None:
+        rp = self.result.packs.rp
+        geometry = json.loads((rp / "models" / "blocks" / "testmod_ruby_gear.geo.json").read_text())
+        (cube,) = geometry["minecraft:geometry"][0]["bones"][0]["cubes"]
+        # Authored 12 x 8 x 8 around (8, 8, 8) with rescale 0.5 -> 6 x 4 x 4.
+        self.assertEqual(cube["size"], [6.0, 4.0, 4.0])
+        self.assertEqual(cube["rotation"], [0.0, -22.5, 0.0])
+        self.assertEqual(cube["pivot"], [0.0, 8.0, 0.0])
 
     # -- conversion -------------------------------------------------------
     def test_block_converted_with_texture(self) -> None:
