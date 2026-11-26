@@ -4,6 +4,7 @@ from .entities import convert_entity_feature
 from .items import convert_item
 from .pack_writer import PackWriter
 from .recipes import convert_recipe
+from .sounds import convert_sound_feature
 from .worldgen import convert_worldgen
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "convert_recipe",
     "convert_entity_feature",
     "convert_worldgen",
+    "convert_sound_feature",
 ]

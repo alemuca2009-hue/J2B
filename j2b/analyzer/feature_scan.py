@@ -78,6 +78,7 @@ class ModScanner:
             self._scan_recipes(namespace)
             self._scan_worldgen(namespace)
             self._scan_entities(namespace)
+            self._scan_sounds(namespace)
         self._scan_classes()
         self._scan_pack_declaration()
         stats = self._stats()
@@ -285,6 +286,45 @@ class ModScanner:
             ):
                 models.append(name)
         return models
+
+    # -- sound ------------------------------------------------------------
+    def _scan_sounds(self, namespace: str) -> None:
+        """``assets/<ns>/sounds.json`` -> one feature per file.
+
+        Java lets the array hold bare strings and ``{name, volume, pitch}``
+        objects; both are normalised to objects here so the converter has one
+        shape to read instead of three.
+        """
+        path = f"assets/{namespace}/sounds.json"
+        payload = self.archive.json(path)
+        if not isinstance(payload, dict) or not payload:
+            return
+        normalised: dict[str, Any] = {}
+        for name, spec in payload.items():
+            if not isinstance(spec, dict):
+                continue
+            sounds = spec.get("sounds")
+            if not isinstance(sounds, list):
+                continue
+            entries: list[dict[str, Any]] = []
+            for entry in sounds:
+                if isinstance(entry, str):
+                    entries.append({"name": entry, "type": "file"})
+                elif isinstance(entry, dict):
+                    entries.append(entry)
+            normalised[str(name)] = {**spec, "sounds": entries}
+        if not normalised:
+            return
+        self.features.append(
+            Feature(
+                id=f"{namespace}:sound:sounds",
+                kind="sound",
+                name="sounds",
+                display=f"{namespace} sounds",
+                source=path,
+                data={"namespace": namespace, "sounds": normalised, "path": path},
+            )
+        )
 
     # -- classes ----------------------------------------------------------
     def _scan_classes(self) -> None:

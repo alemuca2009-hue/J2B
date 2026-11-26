@@ -19,8 +19,9 @@ Ordered by what blocks a usable release, then by how much fidelity each item buy
       GeckoLib passthrough, `.bbmodel` outliner → bones, models matched to entities by filename.
 - [ ] **Animations.** Java `.json` entity animations → Bedrock `animations` block. Keyframe and
       molang translation; partial coverage is fine if each animation is marked exact/approximate.
-- [ ] **Audio.** `sounds.json` + `.ogg` → `sound_definitions.json` + `sounds/`. Straightforward
-      and currently missing entirely.
+- [x] **Audio.** `sounds.json` + `.ogg` → `sound_definitions.json` + `sounds/`. Done in 1.4.0:
+      names rewritten to file paths, categories mapped onto Bedrock's enum, `event` entries and
+      subtitles reported.
 - [ ] **Item models with sub-models** (`display` transforms) → Bedrock `minecraft:icon` and
       `attachables`, so handheld tools do not render flat.
 - [x] **Blockbench `.bbmodel`** import: mods increasingly ship these instead of `elements`.
@@ -44,14 +45,13 @@ Ordered by what blocks a usable release, then by how much fidelity each item buy
 - [ ] Golden-file test: a small hand-built jar → committed expected output tree.
 - [ ] Fuzz the archive reader against truncated/malformed jars.
 
-## P3 — Geometry fidelity, remaining
+## P5 — Geometry fidelity, remaining
 
 - [ ] **In-game sign check for the X mirror.** The convention is now pinned to four
       implementations and to the `cross` golden, but a screenshot of a stair, a door and a
       Create shaft in a real world would close it completely.
-- [ ] **`rescale` on Java elements.** Java shrinks a model around its rotation pivot; Bedrock has
-      no equivalent, so the cube keeps its authored size. Rotated-and-rescaled details (many
-      Create machine arms) are therefore oversized.
+- [x] **`rescale` on Java elements.** Done in 1.4.0: the factor is folded into the bounds about the
+      rotation origin, which is the point Java scales about, so the pivot does not move.
 - [ ] **Cylinders.** Create and Valkyrien build curved parts from explicit vertex polygons, not
       cubes. Bedrock `poly_mesh` is the only target and it supports triangles/free vertices;
       nothing converts `.json` polylines yet.

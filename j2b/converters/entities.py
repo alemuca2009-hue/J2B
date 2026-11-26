@@ -22,6 +22,26 @@ from .entity_models import bone_count, convert_model
 _IDENTIFIER_SAFE = set("abcdefghijklmnopqrstuvwxyz0123456789_.")
 
 
+def _texture_size(payload: dict, ctx: ConversionContext) -> tuple[int, int] | None:
+    """Pixel size of the texture a model names, for models that do not say.
+
+    Only a fallback: a Java model that declares ``texture_size`` and a
+    Blockbench project that declares ``resolution`` are both believed first,
+    because that is the space their UVs were authored in.
+    """
+    textures = payload.get("textures")
+    if not isinstance(textures, dict):
+        return None
+    references = [value for key, value in textures.items() if key != "particle" and isinstance(value, str)]
+    for reference in references:
+        info = ctx.textures.info_for(reference)
+        if info and info.width and info.height:
+            # An animated PNG is a vertical filmstrip; the UV space is one frame.
+            height = info.width if info.frames > 1 else info.height
+            return (info.width, height)
+    return None
+
+
 def _slug(value: str) -> str:
     cleaned = "".join(char if char in _IDENTIFIER_SAFE else "_" for char in value.lower())
     return cleaned.strip("_") or "entity"
@@ -51,7 +71,7 @@ def convert_entity_feature(feature: Feature, ctx: ConversionContext) -> None:
         # variants rather than overwriting the first.
         identifier = f"geometry.{namespace}.{name}" if index == 0 else f"geometry.{namespace}.{name}_{index + 1}"
         try:
-            document, notes = convert_model(payload, identifier)
+            document, notes = convert_model(payload, identifier, _texture_size(payload, ctx))
         except (ValueError, TypeError, KeyError) as error:
             feature.add_issue(
                 "warning",

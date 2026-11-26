@@ -69,6 +69,27 @@ def is_bbmodel(payload: Any) -> bool:
     return isinstance(payload, dict) and isinstance(payload.get("elements"), list) and "outliner" in payload
 
 
+def is_java_model(payload: Any) -> bool:
+    """A Blockbench "Modded Entity" / Java model: elements, no outliner, no parent.
+
+    Create ships seven of these -- entity hats, blueprint boards, a minecart
+    coupling ring -- and they are the one entity format that is pure data: the
+    element schema is the same one Java block models use, which is why the block
+    cube converter reads them unchanged.
+
+    A model with a ``parent`` is excluded on purpose: its elements live in
+    another file, and inventing them would put the wrong shape in the pack.
+    """
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("elements"), list)
+        and bool(payload["elements"])
+        and "outliner" not in payload
+        and "parent" not in payload
+        and not is_geometry_document(payload)
+    )
+
+
 def geckolib_geometry(payload: dict[str, Any], identifier: str) -> tuple[dict[str, Any], list[str]]:
     """GeckoLib / Bedrock geometry: rename, and rewrite any nested identifiers."""
     notes: list[str] = []
@@ -130,7 +151,10 @@ def bbmodel_geometry(
     resolution = payload.get("resolution") if isinstance(payload.get("resolution"), dict) else {}
     width = int(resolution.get("width") or DEFAULT_RESOLUTION)
     height = int(resolution.get("height") or DEFAULT_RESOLUTION)
-    if texture_size:
+    if texture_size and not resolution:
+        # Only a project that declares no resolution falls back to the PNG. A
+        # Blockbench UV is measured in the project's resolution, so declaring
+        # the size of an HD texture instead would rescale every face.
         width, height = texture_size
 
     elements = [element for element in payload.get("elements") or [] if isinstance(element, dict)]
@@ -143,7 +167,7 @@ def bbmodel_geometry(
 
     # One conversion for the whole element list keeps the numbering in the notes
     # meaningful and lets a single material pass serve every cube.
-    converted = elements_to_cubes(elements, lambda _element, _face: "entity")
+    converted = elements_to_cubes(elements, lambda _element, _face: "entity", honour_inflate=True)
     if converted.notes:
         notes.extend(converted.notes)
 
@@ -237,6 +261,139 @@ def bbmodel_geometry(
     return document, notes, converted
 
 
+def _scale_uvs(cubes: list[dict[str, Any]], width: int, height: int) -> None:
+    """Move per-face UVs from Java's 0..16 space into texture pixels.
+
+    A Java face UV always spans 0..16 whatever the texture's resolution, while a
+    Bedrock UV is divided by ``texture_width``/``texture_height``. Declaring a
+    64 px texture and leaving the numbers in 0..16 makes every face sample one
+    sixteenth of the picture, so the two have to move together.
+    """
+    scale_u, scale_v = width / 16.0, height / 16.0
+    if scale_u == 1.0 and scale_v == 1.0:
+        return
+    for cube in cubes:
+        faces = cube.get("uv")
+        if not isinstance(faces, dict):
+            continue
+        for face in faces.values():
+            if not isinstance(face, dict):
+                continue
+            for key in ("uv", "uv_size"):
+                pair = face.get(key)
+                if isinstance(pair, list) and len(pair) == 2:
+                    face[key] = [round(pair[0] * scale_u, 6), round(pair[1] * scale_v, 6)]
+
+
+def java_model_geometry(
+    payload: dict[str, Any],
+    identifier: str,
+    texture_size: tuple[int, int] | None = None,
+) -> tuple[dict[str, Any], list[str], CubeResult]:
+    """Blockbench "Java Block/Item" model used for an entity -> Bedrock geometry.
+
+    ``groups`` is optional in this format. When present it is a tree whose
+    leaves are element *indices* (a full ``.bbmodel`` uses uuids instead) and
+    whose branches are nested groups; each group becomes a bone and each nested
+    group a child bone, which is what keeps a jaw hinged to a head. Elements no
+    group claims are kept on a ``body`` bone rather than dropped.
+    """
+    notes: list[str] = []
+    raw_elements = payload.get("elements") or []
+    # Group children index the *original* list, so positions are tracked through
+    # the elements the cube converter skips instead of assuming none are.
+    converted = CubeResult()
+    cube_at: dict[int, dict[str, Any]] = {}
+    for position, element in enumerate(raw_elements):
+        if not isinstance(element, dict):
+            continue
+        before = len(converted.cubes)
+        elements_to_cubes([element], lambda _element, _face: "entity", converted)
+        if len(converted.cubes) > before:
+            cube_at[position] = converted.cubes[-1]
+    notes.extend(converted.notes)
+    if not converted.cubes:
+        raise ValueError("the model contains no convertible elements")
+
+    declared = payload.get("texture_size")
+    width, height = (16, 16)
+    if isinstance(declared, (list, tuple)) and len(declared) == 2:
+        try:
+            width, height = int(declared[0]), int(declared[1])
+        except (TypeError, ValueError):
+            pass
+    elif texture_size:
+        width, height = texture_size
+    if width <= 0 or height <= 0:
+        width, height = (16, 16)
+    _scale_uvs(converted.cubes, width, height)
+
+    bones: list[dict[str, Any]] = []
+    used: set[str] = set()
+    claimed: set[int] = set()
+
+    def walk(group: Any, parent: str | None, depth: int) -> None:
+        if not isinstance(group, dict):
+            return
+        if depth > 32:
+            notes.append("group nesting exceeded 32 levels; deeper groups were flattened.")
+            return
+        pivot = _numbers(group.get("origin")) or [8.0, 0.0, 8.0]
+        bone: dict[str, Any] = {
+            "name": _bone_name(group.get("name"), len(bones), used),
+            # Same centring shift and X mirror the cubes get.
+            "pivot": [8.0 - pivot[0], pivot[1], pivot[2] - 8.0],
+        }
+        if parent:
+            bone["parent"] = parent
+        rotation = _numbers(group.get("rotation"))
+        if rotation and any(abs(value) > 1e-6 for value in rotation):
+            bone["rotation"] = [-rotation[0], -rotation[1], rotation[2]]
+        bones.append(bone)  # parents first: Bedrock resolves `parent` by name
+        cubes: list[dict[str, Any]] = []
+        for child in group.get("children") or []:
+            if isinstance(child, bool):
+                continue
+            if isinstance(child, int):
+                if child in cube_at and child not in claimed:
+                    claimed.add(child)
+                    cubes.append(cube_at[child])
+            elif isinstance(child, dict):
+                walk(child, bone["name"], depth + 1)
+        if cubes:
+            bone["cubes"] = cubes
+
+    groups = payload.get("groups")
+    if isinstance(groups, list):
+        for entry in groups:
+            if isinstance(entry, dict):
+                walk(entry, None, 0)
+            elif isinstance(entry, int) and not isinstance(entry, bool):
+                continue  # a bare index at the top level: an ungrouped element
+
+    leftovers = [cube for position, cube in sorted(cube_at.items()) if position not in claimed]
+    if leftovers:
+        bones.append({"name": _bone_name("body", len(bones), used), "pivot": [0, 0, 0], "cubes": leftovers})
+
+    document = {
+        "format_version": "1.16.0",
+        "minecraft:geometry": [
+            {
+                "description": {
+                    "identifier": identifier,
+                    "texture_width": width,
+                    "texture_height": height,
+                    "visible_bounds_width": 3,
+                    "visible_bounds_height": 3,
+                    "visible_bounds_offset": [0, 1.5, 0],
+                },
+                "bones": bones,
+            }
+        ],
+    }
+    return document, notes, converted
+
+
 def convert_model(
     payload: dict[str, Any],
     identifier: str,
@@ -247,6 +404,9 @@ def convert_model(
         return geckolib_geometry(payload, identifier)
     if is_bbmodel(payload):
         document, notes, _cubes = bbmodel_geometry(payload, identifier, texture_size)
+        return document, notes
+    if is_java_model(payload):
+        document, notes, _cubes = java_model_geometry(payload, identifier, texture_size)
         return document, notes
     raise ValueError(
         "the file is neither a Bedrock/GeckoLib geometry nor a Blockbench project"

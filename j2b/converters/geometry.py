@@ -52,6 +52,7 @@ UV rectangle alone cannot express, so it is written as Bedrock's per-face
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -66,6 +67,8 @@ class CubeResult:
     notes: list[str] = field(default_factory=list)
     approximated: bool = False
     dropped_faces: int = 0
+    #: Elements that asked Java for ``shade: false`` and are shaded on Bedrock.
+    unshaded: int = 0
 
 
 def _numbers(value: Any, length: int = 3) -> list[float] | None:
@@ -148,8 +151,6 @@ def _rotation(element: dict[str, Any], notes: list[str], index: int) -> tuple[li
         return None
     if angle_value == 0.0:
         return None
-    if spec.get("rescale"):
-        notes.append(f"element {index}: Java `rescale` has no Bedrock equivalent; the cube keeps its authored size.")
     # Bedrock's geometry space is X-mirrored, so the angle is negated on X and Y
     # and kept on Z -- see the module docstring for the four sources that agree.
     rotation = [0.0, 0.0, 0.0]
@@ -158,12 +159,83 @@ def _rotation(element: dict[str, Any], notes: list[str], index: int) -> tuple[li
     return rotation, pivot, abs(angle_value % ROTATION_STEP) > 1e-6, angle_value
 
 
+def element_rescale(element: dict[str, Any]) -> float:
+    """Java's ``rescale`` factor for one element, or ``1.0`` when it has none.
+
+    The field sits *inside* the ``rotation`` block and only ever applies to a
+    rotated element: vanilla ``FaceBakery`` builds its matrix from the rotation
+    and inserts the scale into that matrix, so a stray ``rescale`` on an
+    unrotated element renders at full size.
+    """
+    spec = element.get("rotation")
+    if not isinstance(spec, dict):
+        return 1.0
+    if not spec.get("angle"):
+        return 1.0
+    raw = spec.get("rescale")
+    if raw is None:
+        return 1.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(value) or value <= 0.0:
+        return 1.0
+    return value
+
+
+def apply_rescale(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fold Java ``rescale`` into the element bounds.
+
+    Java does not shrink a rotated element about its centre. ``FaceBakery``
+    builds ``translate(origin) * scale(rescale) * rotate(angle) *
+    translate(-origin)``, so the box contracts toward the *rotation origin* and
+    the pivot itself does not move. Bedrock has no ``rescale`` field, but it
+    does not need one: a cube is stored as bounds plus a pivot, so scaling the
+    bounds about that pivot and reusing the pivot gives the same shape. Create's
+    machine arms -- rotated, rescaled by 0.5 and otherwise oversized in the
+    export -- are the models this recovers.
+
+    UVs are deliberately left alone. Java keeps each face's texture region and
+    lets it squash onto the smaller quad, which is what a Bedrock ``uv_size``
+    does when the cube shrinks underneath it.
+
+    Elements are copied, never mutated, and the ``rescale`` key is dropped so a
+    later stage cannot apply the factor a second time.
+    """
+    out: list[dict[str, Any]] = []
+    for element in elements:
+        factor = element_rescale(element) if isinstance(element, dict) else 1.0
+        if factor == 1.0:
+            out.append(element)
+            continue
+        low = _numbers(element.get("from"))
+        high = _numbers(element.get("to"))
+        spec = element.get("rotation")
+        spec = spec if isinstance(spec, dict) else {}
+        pivot = _numbers(spec.get("origin")) or [8.0, 8.0, 8.0]
+        if low is None or high is None:
+            out.append(element)
+            continue
+        scaled = dict(element)
+        scaled["from"] = [round(pivot[i] + factor * (low[i] - pivot[i]), 9) for i in range(3)]
+        scaled["to"] = [round(pivot[i] + factor * (high[i] - pivot[i]), 9) for i in range(3)]
+        scaled["rotation"] = {key: value for key, value in spec.items() if key != "rescale"}
+        out.append(scaled)
+    return out
+
+
 def elements_to_cubes(
     elements: list[dict[str, Any]],
     material_for: Callable[[dict[str, Any], str], str],
     result: CubeResult | None = None,
+    honour_inflate: bool = False,
 ) -> CubeResult:
-    """Convert Java elements into Bedrock cubes."""
+    """Convert Java elements into Bedrock cubes.
+
+    ``honour_inflate`` is for Blockbench projects, whose elements share this
+    schema but add an ``inflate`` field the vanilla format does not have.
+    """
     out = result or CubeResult()
 
     for index, element in enumerate(elements):
@@ -189,6 +261,29 @@ def elements_to_cubes(
         if any(value <= 0 for value in size):
             out.notes.append(f"element {index}: zero-thickness axis ({size}); Bedrock renders it as a flat plane.")
             size = [max(value, 0.0) for value in size]
+
+        # ``inflate`` is a Blockbench cube property, not part of the vanilla Java
+        # model schema: the game ignores a stray one, so it is only honoured when
+        # the caller says the elements came from a ``.bbmodel``. There it grows
+        # the box on every side and Bedrock has the identical field.
+        inflate_value = None
+        if honour_inflate and element.get("inflate") is not None:
+            try:
+                inflate_value = float(element["inflate"])
+            except (TypeError, ValueError):
+                out.notes.append(f"element {index}: `inflate` is not a number and was ignored.")
+
+        # ``shade: false`` asks Java to skip directional shading on this element
+        # (glowing pipes, glass overlays). Bedrock has no per-cube switch -- the
+        # nearest thing, ``face_dimming``, belongs to a whole material instance --
+        # so the cube is emitted shaded and the difference is reported instead
+        # of passing as honoured.
+        if element.get("shade") is False:
+            out.unshaded += 1
+            out.notes.append(
+                f"element {index}: Java `shade: false` has no per-cube Bedrock equivalent; "
+                "the cube is shaded like the rest of the model."
+            )
 
         # ``8 - high[0]`` is Java's ``low[0] - 8`` after the X mirror.
         origin = [8.0 - high[0], low[1], low[2] - 8.0]
@@ -254,7 +349,9 @@ def elements_to_cubes(
                 )
         if len(used_materials) == 1:
             cube["material"] = next(iter(used_materials))
-        if size[0] == 0 or size[2] == 0:
+        if inflate_value:
+            cube["inflate"] = inflate_value
+        elif size[0] == 0 or size[2] == 0:
             cube["inflate"] = 0.0
         out.cubes.append(cube)
 

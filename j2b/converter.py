@@ -18,6 +18,7 @@ from .converters import (
     convert_item,
     convert_recipe,
     convert_worldgen,
+    convert_sound_feature,
 )
 from .converters.context import TextureManager
 from .history import ConversionHistory
@@ -63,6 +64,8 @@ class Converter:
             convert_entity_feature(feature, ctx)
         elif feature.kind == "worldgen":
             convert_worldgen(feature, ctx)
+        elif feature.kind == "sound":
+            convert_sound_feature(feature, ctx)
         else:
             self._convert_by_knowledge(feature)
 

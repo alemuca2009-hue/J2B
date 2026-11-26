@@ -17,7 +17,7 @@ from ..analyzer.model_resolver import EXACT_TEMPLATES, ResolvedModel
 from ..models import Feature
 from ..utils import slugify, split_id
 from .context import ConversionContext
-from .geometry import FACE_NAMES, build_geometry, collision_box, elements_to_cubes
+from .geometry import FACE_NAMES, apply_rescale, build_geometry, collision_box, elements_to_cubes
 from .machines import station_for_block
 from .variants import BlockStatePlan, parse_blockstate, rotate_elements
 
@@ -168,7 +168,12 @@ def _resolve_variant_geometry(
     if model.is_full_cube:
         return FULL_BLOCK, [], False, notes
 
-    elements = rotate_elements(model.elements, x, y) if (x or y) else model.elements
+    # ``rescale`` is folded into the bounds first: it contracts the box toward
+    # the rotation origin, so it has to happen before the variant rotation is
+    # baked or the two disagree about which point they scale about.
+    elements = apply_rescale(model.elements)
+    if x or y:
+        elements = rotate_elements(elements, x, y)
     result = elements_to_cubes(elements, _material_resolver(table, model))
     if not result.cubes:
         notes.extend(result.notes)

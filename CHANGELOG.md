@@ -3,6 +3,27 @@
 All notable changes to J2B Studio. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning is [semantic](https://semver.org/).
 
+## [1.4.0] — 2026-11-26
+
+### Added
+- **Sound converts.** A mod's `assets/<namespace>/sounds.json` becomes a Bedrock `sound_definitions.json`
+  and its `.ogg` files are copied into `sounds/`, keeping the directory layout the definition points at.
+  Names are rewritten from Java's `create:whistle` to Bedrock's `sounds/create/whistle`, because
+  Bedrock resolves a definition to a file path: an identifier that keeps the colon loads in the pack
+  and then never plays. Volume, pitch, weight and `stream` carry over. Two things are reported
+  instead of invented: a Java `type: "event"` entry (which points at another *event*, not a file,
+  and has no Bedrock form) and Java subtitles, which Bedrock does not have. Sound categories are
+  mapped onto Bedrock's enum, with `master`/`record`/`blocks`/`players` folded onto the category
+  that means the same thing rather than written out verbatim — which would fail the schema.
+
+### Fixed
+- **Java `rescale` on rotated elements is applied, not dropped.** `FaceBakery` builds
+  `translate(origin) · scale(rescale) · rotate(angle) · translate(-origin)`, so a rescaled element
+  contracts toward its rotation origin with the pivot staying put. Bedrock has no `rescale` field
+  but does not need one — a cube is bounds plus a pivot — so the bounds are scaled about that same
+  origin and the pivot is reused. Create's machine arms, rotated and rescaled by 0.5, were
+  previously exported at twice their authored size with a limitation note attached.
+
 ## [1.3.0] — 2026-11-26
 
 ### Added

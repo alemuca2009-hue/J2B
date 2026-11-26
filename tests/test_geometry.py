@@ -11,6 +11,7 @@ import unittest
 
 from j2b.converters.geometry import (
     CubeResult,
+    apply_rescale,
     build_geometry,
     collision_box,
     elements_to_cubes,
@@ -208,3 +209,96 @@ class BedrockMirrorConventionTests(unittest.TestCase):
             }
         )
         self.assertEqual(result.cubes[0]["rotation"], [0.0, 0.0, 30.0])
+
+
+class RescaleTests(unittest.TestCase):
+    """Java ``rescale`` is not a limitation any more: it is a smaller box.
+
+    ``FaceBakery`` scales a rotated element about the rotation origin before it
+    rotates it, so on Bedrock -- bounds plus a pivot -- the same shape is a box
+    contracted toward that pivot. Getting the centre wrong instead of the
+    origin moves the part: a 0.5 arm anchored off-centre would end up eight
+    units from where the machine expects it.
+    """
+
+    ELEMENT = {
+        "from": [2, 4, 6],
+        "to": [14, 12, 10],
+        "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": 0.5},
+        "faces": {
+            "north": {"uv": [0, 0, 12, 8]},
+            "up": {"uv": [0, 8, 12, 12]},
+        },
+    }
+
+    def test_box_contracts_toward_the_rotation_origin(self) -> None:
+        (cube,) = elements_to_cubes([apply_rescale([self.ELEMENT])[0]], _material).cubes
+        # Every coordinate moves halfway to the pivot at (8, 8, 8):
+        # (2,4,6)-(14,12,10) becomes (5,6,7)-(11,10,9).
+        self.assertEqual(cube["origin"], [-3.0, 6.0, -1.0])
+        self.assertEqual(cube["size"], [6.0, 4.0, 2.0])
+        self.assertEqual(cube["pivot"], [0.0, 8.0, 0.0])
+
+    def test_uvs_keep_their_authored_region(self) -> None:
+        (cube,) = elements_to_cubes([apply_rescale([self.ELEMENT])[0]], _material).cubes
+        # Java squashes the same texture region onto the smaller quad.
+        self.assertEqual(cube["uv"]["north"]["uv"], [0.0, 0.0])
+        self.assertEqual(cube["uv"]["north"]["uv_size"], [12.0, 8.0])
+
+    def test_rescale_no_longer_produces_a_limitation(self) -> None:
+        result = elements_to_cubes([apply_rescale([self.ELEMENT])[0]], _material)
+        self.assertEqual([note for note in result.notes if "rescale" in note], [])
+
+    def test_off_centre_origin_is_the_point_that_scales(self) -> None:
+        element = {
+            "from": [0, 0, 0],
+            "to": [8, 8, 8],
+            "rotation": {"origin": [0, 8, 8], "axis": "x", "angle": 22.5, "rescale": 0.25},
+            "faces": {"north": {"uv": [0, 0, 8, 8]}},
+        }
+        (cube,) = elements_to_cubes([apply_rescale([element])[0]], _material).cubes
+        self.assertEqual(cube["size"], [2.0, 2.0, 2.0])
+        self.assertEqual(cube["pivot"], [8.0, 8.0, 0.0])
+
+    def test_rescale_without_a_rotation_is_ignored_like_java(self) -> None:
+        element = {
+            "from": [0, 0, 0],
+            "to": [16, 16, 16],
+            "rotation": {"rescale": 0.5},
+            "faces": {"north": {"uv": [0, 0, 16, 16]}},
+        }
+        self.assertEqual(apply_rescale([element])[0], element)
+
+    def test_nonsense_factors_fall_back_to_full_size(self) -> None:
+        for bad in (0, -1, "nope", None, float("nan")):
+            element = {
+                "from": [0, 0, 0],
+                "to": [16, 16, 16],
+                "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": bad},
+                "faces": {"north": {"uv": [0, 0, 16, 16]}},
+            }
+            self.assertEqual(apply_rescale([element])[0], element, msg=repr(bad))
+
+    def test_factor_is_consumed_once(self) -> None:
+        once = apply_rescale([self.ELEMENT])[0]
+        twice = apply_rescale([once])[0]
+        self.assertEqual(once, twice)
+
+    def test_rescaled_element_survives_variant_baking(self) -> None:
+        from j2b.converters.variants import rotate_elements
+
+        element = {
+            "from": [1, 4, 7],
+            "to": [9, 12, 9],
+            "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 22.5, "rescale": 0.5},
+            "faces": {"north": {"uv": [0, 0, 8, 8]}},
+        }
+        (baked,) = rotate_elements(apply_rescale([element]), 0, 90)
+        # Rescaled extents are 4 x 4 x 1; a quarter turn about the centre swaps
+        # X and Z and must leave the sizes alone.
+        extents = [round(baked["to"][axis] - baked["from"][axis], 6) for axis in range(3)]
+        self.assertEqual(sorted(extents), [1.0, 4.0, 4.0])
+        self.assertAlmostEqual(extents[1], 4.0, places=6)
+        # And the fractional tilt still reaches Bedrock as a rotation.
+        self.assertEqual(baked["rotation"]["axis"], "y")
+        self.assertAlmostEqual(baked["rotation"]["angle"], 22.5, places=6)

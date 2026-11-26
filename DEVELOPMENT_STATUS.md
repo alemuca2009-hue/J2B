@@ -2,12 +2,23 @@
 
 Continue-from-here file. If a session ends, this is the first thing to read.
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 **Branch:** `main`
-**Tests:** 136 tests, 259 subtests — all green (`python -m pytest -q`, ~0.4 s)
+**Tests:** 156 tests, 259 subtests — all green (`python -m pytest -q`, ~0.4 s)
 **Windows build:** workflow green on `windows-latest` (run 45880077117, v1.2.1). One-file exe
 12.2 MB and portable folder both passed every self-test probe, including a conversion run inside
 the frozen process. Artifacts are on the run; v1.3.0 is the first tag cut with the geometry fix.
+
+## Last changes (1.4.0)
+
+| Area | What |
+| --- | --- |
+| `j2b/converters/sounds.py` | New. `sounds.json` → `sound_definitions.json`, `.ogg` copied to `sounds/`, identifiers rewritten to file paths, categories mapped onto Bedrock's enum. |
+| `j2b/analyzer/feature_scan.py` | `_scan_sounds`: one `sound` feature per namespace, bare-string and object entries normalised to one shape. |
+| `j2b/converters/geometry.py` | `element_rescale` / `apply_rescale`: Java `rescale` folded into the box bounds about the rotation origin. |
+| `j2b/converters/blocks.py` | Rescale applied before the variant rotation is baked, so both agree on the point they scale about. |
+| `tests/test_sounds.py` | New. |
+| `tests/test_geometry.py` | `RescaleTests`: origin anchor, UVs untouched, idempotence, nonsense factors, survival of variant baking. |
 
 ## Last changes (1.3.0)
 
