@@ -55,7 +55,7 @@ class RotationTests(unittest.TestCase):
             }
         )
         cube = result.cubes[0]
-        self.assertEqual(cube["rotation"], [0.0, 90.0, 0.0])
+        self.assertEqual(cube["rotation"], [0.0, -90.0, 0.0])
         self.assertEqual(cube["pivot"], [0.0, 8.0, 0.0])
         self.assertFalse(result.approximated)
 
@@ -69,7 +69,7 @@ class RotationTests(unittest.TestCase):
             }
         )
         cube = result.cubes[0]
-        self.assertEqual(cube["rotation"], [22.5, 0.0, 0.0])
+        self.assertEqual(cube["rotation"], [-22.5, 0.0, 0.0])
         self.assertEqual(cube["pivot"], [0.0, 0.0, 0.0])
         # Kept, but flagged: the shape is right while shading is not.
         self.assertTrue(result.approximated)
@@ -84,7 +84,7 @@ class RotationTests(unittest.TestCase):
                 "faces": {"up": {"uv": [0, 0, 12, 12]}},
             }
         )
-        self.assertEqual(result.cubes[0]["pivot"], [-6.0, 14.0, 0.0])
+        self.assertEqual(result.cubes[0]["pivot"], [6.0, 14.0, 0.0])
         self.assertEqual(result.cubes[0]["rotation"], [0.0, 0.0, -90.0])
 
     def test_rotated_cube_claims_no_collision_box(self) -> None:
@@ -152,3 +152,59 @@ class UvTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BedrockMirrorConventionTests(unittest.TestCase):
+    """The X mirror and the rotation signs, pinned to a game-verified export.
+
+    Bedrock geometry is defined in a space that mirrors X relative to Java's, so
+    ``origin.x`` is ``8 - to.x`` and a rotation is negated on X and Y and kept on
+    Z. Every one of those three signs was wrong before this test existed, and
+    the only visible symptom was a model that loaded and looked plausible while
+    being flipped east to west.
+
+    The expected values below are vanilla ``block/cross`` as Blockbench exports
+    it; the same output is the ``cross`` golden that ``mc-model-geo`` uses to
+    lock its own converter, so it is verified in game rather than argued from
+    first principles.
+    """
+
+    CROSS = [
+        {"from": [0, 0, 8], "to": [16, 16, 8], "rotation": {"origin": [8, 0, 8], "axis": "y", "angle": 45}},
+        {"from": [0, 0, 8], "to": [16, 16, 8], "rotation": {"origin": [8, 0, 8], "axis": "y", "angle": -45}},
+    ]
+
+    def test_vanilla_cross_matches_the_bedrock_export(self) -> None:
+        result = elements_to_cubes(self.CROSS, _material)
+        expected = [
+            {"origin": [-8, 0, 0], "size": [16, 16, 0], "pivot": [0, 0, 0], "rotation": [0, 45, 0]},
+            {"origin": [-8, 0, 0], "size": [16, 16, 0], "pivot": [0, 0, 0], "rotation": [0, -45, 0]},
+        ]
+        for cube, want in zip(result.cubes, expected):
+            self.assertEqual(cube["origin"], [float(v) for v in want["origin"]])
+            self.assertEqual(cube["size"], [float(v) for v in want["size"]])
+            self.assertEqual(cube["pivot"], [float(v) for v in want["pivot"]])
+            self.assertEqual(cube["rotation"], [float(v) for v in want["rotation"]])
+
+    def test_an_asymmetric_box_is_mirrored_east_west(self) -> None:
+        # Java authors this flush against the east edge; Bedrock's mirror puts
+        # it flush against the west edge, which is the same wall.
+        result = _one({"from": [12, 0, 0], "to": [16, 8, 16], "faces": {"up": {"uv": [0, 0, 4, 16]}}})
+        self.assertEqual(result.cubes[0]["origin"], [-8.0, 0.0, -8.0])
+        # Its mirror image, authored on the other side, is the one that lands
+        # at the opposite corner -- so the pair cannot both be right.
+        other = _one({"from": [0, 0, 0], "to": [4, 8, 16], "faces": {"up": {"uv": [0, 0, 4, 16]}}})
+        self.assertEqual(other.cubes[0]["origin"], [4.0, 0.0, -8.0])
+
+    def test_z_rotation_is_not_negated(self) -> None:
+        # X is mirrored, so a turn about Y flips sign; a turn about Z shares the
+        # mirror axis and therefore does not.
+        result = _one(
+            {
+                "from": [4, 4, 4],
+                "to": [12, 12, 12],
+                "rotation": {"origin": [8, 8, 8], "axis": "z", "angle": 30},
+                "faces": {"north": {"uv": [0, 0, 8, 8]}},
+            }
+        )
+        self.assertEqual(result.cubes[0]["rotation"], [0.0, 0.0, 30.0])

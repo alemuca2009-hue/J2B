@@ -2,9 +2,27 @@
 
 Java model space puts the block corner at ``(0, 0, 0)`` and runs 0..16 on each
 axis, with ``+x`` east, ``+y`` up and ``+z`` south. Bedrock block geometry puts
-the origin at the centre of the block's bottom face, so the horizontal axes are
-offset by 8. Nothing else changes: both spaces are right-handed with the same
-axis directions, which is why there is no mirroring step.
+the origin at the centre of the block's bottom face *and mirrors X*: a Bedrock
+cube at ``origin.x = 8 - to.x`` is the one Java authored at ``to.x``. Getting
+that mirror wrong is invisible in a diff -- a symmetric pillar looks correct and
+a stair, a pipe or a door hinge comes out flipped east to west.
+
+The convention here is not inferred, it is copied from the four implementations
+that agree with each other and with the game:
+
+* Blockbench ``compileCube``/``compileGroup`` (``js/formats/bedrock/bedrock.js``):
+  ``origin[0] = -(from[0] + size[0])`` after the ``-8`` centring shift,
+  ``pivot[0] *= -1``, and rotation components X and Y negated with Z kept.
+* GeyserMC ``PackConverter`` ``ModelConverter``: ``ELEMENT_OFFSET`` of
+  ``[8, 0, 8]``, ``origin.x = 8 - to.x``, the same X/Y negation.
+* Kas-tle ``java2bedrock.sh``: ``origin: [(-.to[0] + 8), from[1], from[2] - 8]``,
+  ``x``/``y`` angles negated, ``z`` kept.
+* ``mc-model-geo`` (EaseCation), which locks the convention against a
+  game-verified ``cross`` golden.
+
+So a rotation is not simply re-expressed: mirroring X conjugates it, which is
+why Java's ``axis: x, angle: 22.5`` is Bedrock's ``[-22.5, 0, 0]`` and Java's
+``axis: z, angle: -90`` stays ``[0, 0, -90]``.
 
 Face names (``north``/``south``/``east``/``west``/``up``/``down``) are identical
 in both formats, so they are copied, not translated.
@@ -106,8 +124,9 @@ def _rotation(element: dict[str, Any], notes: list[str], index: int) -> tuple[li
     Both formats rotate a whole cube about a single point, so this is exact for
     every angle — including the fractional ones modded models use constantly
     (Create alone builds most of its machinery out of 22.5° steps). The pivot
-    only needs the space shift, because Java measures from the block corner and
-    Bedrock from the centre of the bottom face.
+    needs the same ``−8`` centring *and* the same X mirror as the box, or a
+    tilting part swings around a point one mirror away from the one the author
+    picked.
 
     The third return value is ``True`` and the fourth is the angle when it is
     not a quarter turn:
@@ -131,9 +150,11 @@ def _rotation(element: dict[str, Any], notes: list[str], index: int) -> tuple[li
         return None
     if spec.get("rescale"):
         notes.append(f"element {index}: Java `rescale` has no Bedrock equivalent; the cube keeps its authored size.")
+    # Bedrock's geometry space is X-mirrored, so the angle is negated on X and Y
+    # and kept on Z -- see the module docstring for the four sources that agree.
     rotation = [0.0, 0.0, 0.0]
-    rotation["xyz".index(axis)] = angle_value
-    pivot = [origin[0] - 8.0, origin[1], origin[2] - 8.0]
+    rotation["xyz".index(axis)] = -angle_value if axis in ("x", "y") else angle_value
+    pivot = [8.0 - origin[0], origin[1], origin[2] - 8.0]
     return rotation, pivot, abs(angle_value % ROTATION_STEP) > 1e-6, angle_value
 
 
@@ -169,7 +190,8 @@ def elements_to_cubes(
             out.notes.append(f"element {index}: zero-thickness axis ({size}); Bedrock renders it as a flat plane.")
             size = [max(value, 0.0) for value in size]
 
-        origin = [low[0] - 8.0, low[1], low[2] - 8.0]
+        # ``8 - high[0]`` is Java's ``low[0] - 8`` after the X mirror.
+        origin = [8.0 - high[0], low[1], low[2] - 8.0]
         faces = element.get("faces") if isinstance(element.get("faces"), dict) else {}
         uv_map: dict[str, Any] = {}
         used_materials: set[str] = set()
