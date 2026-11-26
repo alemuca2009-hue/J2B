@@ -1,0 +1,303 @@
+"""Java ``elements`` -> Bedrock geometry.
+
+Java model space puts the block corner at ``(0, 0, 0)`` and runs 0..16 on each
+axis, with ``+x`` east, ``+y`` up and ``+z`` south. Bedrock block geometry puts
+the origin at the centre of the block's bottom face, so the horizontal axes are
+offset by 8. Nothing else changes: both spaces are right-handed with the same
+axis directions, which is why there is no mirroring step.
+
+Face names (``north``/``south``/``east``/``west``/``up``/``down``) are identical
+in both formats, so they are copied, not translated.
+
+Where Bedrock cannot express something, the cube is still emitted but the
+reason is recorded — a block that quietly loses its shape is worse than a block
+that reports it.
+
+Three coordinates carry the whole conversion, and all three are exact:
+
+* ``origin`` — Java's box corner minus 8 on the horizontal axes.
+* ``pivot`` — Java's element rotation origin, shifted the same way. Bedrock
+  rotates the cube about this point, just as Java does.
+* ``uv`` / ``uv_size`` — same 0..16 space, same top-left origin, so the
+  values carry over — except on ``up``/``down``, which Bedrock orients 180°
+  the other way round.
+
+Rotations are *not* limited to quarter turns: Bedrock geometry accepts any
+float and Create builds much of its machinery out of 22.5° steps. What Bedrock
+cannot reproduce is the shading — ambient occlusion is computed from the
+unrotated box — so fractional angles are kept and flagged.
+
+A Java face ``rotation`` turns the texture *inside* its own region, which a
+UV rectangle alone cannot express, so it is written as Bedrock's per-face
+``uv_rotation`` and pushes the document to the 1.16.0 schema.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+FACE_NAMES = ("north", "south", "east", "west", "up", "down")
+#: Bedrock cube rotation only accepts quarter turns.
+ROTATION_STEP = 90.0
+
+
+@dataclass
+class CubeResult:
+    cubes: list[dict[str, Any]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    approximated: bool = False
+    dropped_faces: int = 0
+
+
+def _numbers(value: Any, length: int = 3) -> list[float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != length:
+        return None
+    try:
+        return [float(item) for item in value]
+    except (TypeError, ValueError):
+        return None
+
+
+def _face_uv(entry: dict[str, Any], low: list[float], high: list[float], face: str) -> tuple[list[float], list[float]] | None:
+    """Return ``([u, v], [du, dv])`` for one Java face."""
+    raw = _numbers(entry.get("uv"), 4)
+    if raw is None:
+        return None
+    u1, v1, u2, v2 = raw
+    return [u1, v1], [u2 - u1, v2 - v1]
+
+
+#: Face -> (u axis, v axis) of the box it is projected onto.
+_FACE_AXES = {
+    "north": (0, 1),
+    "south": (0, 1),
+    "east": (2, 1),
+    "west": (2, 1),
+    "up": (0, 2),
+    "down": (0, 2),
+}
+
+
+def _auto_uv(low: list[float], high: list[float], face: str) -> tuple[list[float], list[float]]:
+    """Java's implicit UV for a face that declares none.
+
+    Java does not fall back to the whole texture: it unwraps the box, so each
+    face samples a region starting at ``(0, 0)`` whose extent equals the face's
+    own size in model units. A 4x12 detail therefore reads a 4x12 patch, not a
+    squashed 16x16 one.
+    """
+    u_axis, v_axis = _FACE_AXES[face]
+    return [0.0, 0.0], [abs(high[u_axis] - low[u_axis]), abs(high[v_axis] - low[v_axis])]
+
+
+def _uv_rotation(entry: dict[str, Any]) -> float:
+    """Java face ``rotation``: a quarter turn of the texture on the face."""
+    try:
+        value = float(entry.get("rotation") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value % 360.0
+
+
+def _rotation(element: dict[str, Any], notes: list[str], index: int) -> tuple[list[float], list[float], bool, float] | None:
+    """Translate Java element ``rotation`` into a Bedrock cube ``rotation``/``pivot``.
+
+    Both formats rotate a whole cube about a single point, so this is exact for
+    every angle — including the fractional ones modded models use constantly
+    (Create alone builds most of its machinery out of 22.5° steps). The pivot
+    only needs the space shift, because Java measures from the block corner and
+    Bedrock from the centre of the bottom face.
+
+    The third return value is ``True`` and the fourth is the angle when it is
+    not a quarter turn:
+    the shape is right, but Bedrock computes ambient occlusion for rotated
+    cubes from the unrotated box, so the shading may look flat.
+    """
+    spec = element.get("rotation")
+    if not isinstance(spec, dict):
+        return None
+    angle = spec.get("angle")
+    axis = str(spec.get("axis") or "").lower()
+    origin = _numbers(spec.get("origin")) or [8.0, 8.0, 8.0]
+    try:
+        angle_value = float(angle)
+    except (TypeError, ValueError):
+        return None
+    if axis not in ("x", "y", "z"):
+        notes.append(f"element {index}: rotation axis `{axis or 'none'}` is not one of x/y/z; rotation dropped.")
+        return None
+    if angle_value == 0.0:
+        return None
+    if spec.get("rescale"):
+        notes.append(f"element {index}: Java `rescale` has no Bedrock equivalent; the cube keeps its authored size.")
+    rotation = [0.0, 0.0, 0.0]
+    rotation["xyz".index(axis)] = angle_value
+    pivot = [origin[0] - 8.0, origin[1], origin[2] - 8.0]
+    return rotation, pivot, abs(angle_value % ROTATION_STEP) > 1e-6, angle_value
+
+
+def elements_to_cubes(
+    elements: list[dict[str, Any]],
+    material_for: Callable[[dict[str, Any], str], str],
+    result: CubeResult | None = None,
+) -> CubeResult:
+    """Convert Java elements into Bedrock cubes."""
+    out = result or CubeResult()
+
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict):
+            continue
+        low = _numbers(element.get("from"))
+        high = _numbers(element.get("to"))
+        if low is None or high is None:
+            out.notes.append(f"element {index}: `from`/`to` are not three numbers; element skipped.")
+            continue
+
+        mirrored = [axis for axis in range(3) if low[axis] > high[axis]]
+        if mirrored:
+            for axis in mirrored:
+                low[axis], high[axis] = high[axis], low[axis]
+            out.approximated = True
+            out.notes.append(
+                f"element {index}: negative size on {'/'.join('xyz'[a] for a in mirrored)} "
+                "(Java mirrors it); the box is normalised and face UVs are flipped."
+            )
+
+        size = [high[axis] - low[axis] for axis in range(3)]
+        if any(value <= 0 for value in size):
+            out.notes.append(f"element {index}: zero-thickness axis ({size}); Bedrock renders it as a flat plane.")
+            size = [max(value, 0.0) for value in size]
+
+        origin = [low[0] - 8.0, low[1], low[2] - 8.0]
+        faces = element.get("faces") if isinstance(element.get("faces"), dict) else {}
+        uv_map: dict[str, Any] = {}
+        used_materials: set[str] = set()
+
+        for face in FACE_NAMES:
+            entry = faces.get(face)
+            if not isinstance(entry, dict):
+                continue
+            uvs = _face_uv(entry, low, high, face)
+            if uvs is None:
+                uvs = _auto_uv(low, high, face)
+                out.notes.append(
+                    f"element {index}: face `{face}` declares no UV; Java's unwrapped region "
+                    "was computed from the box size instead."
+                )
+            position, extent = uvs
+            # Java and Bedrock both measure UV from the texture's top-left, in
+            # the model's 0..16 texture space, so values carry over unchanged.
+            if "x" in [("x", "y", "z")[axis] for axis in mirrored] and face in ("east", "west"):
+                extent[0] = -extent[0]
+            if "z" in [("x", "y", "z")[axis] for axis in mirrored] and face in ("north", "south"):
+                extent[0] = -extent[0]
+            material = material_for(element, face)
+            used_materials.add(material)
+            if face in ("up", "down"):
+                # Bedrock orients the two horizontal faces the other way round
+                # from Java: Blockbench's compiler and the mc-model-geo port
+                # both move the rect's corner and negate both sizes, which is a
+                # 180° turn of the sampling region. Without it every top
+                # texture lands upside down.
+                position = [position[0] + extent[0], position[1] + extent[1]]
+                extent = [-extent[0], -extent[1]]
+            face_json: dict[str, Any] = {"uv": position, "uv_size": extent, "material": material}
+            spin = _uv_rotation(entry)
+            if spin:
+                # Rotating the sampling region cannot express a turned texture;
+                # Bedrock geometry carries the angle per face instead.
+                face_json["uv_rotation"] = spin
+            uv_map[face] = face_json
+
+        if not uv_map:
+            out.dropped_faces += 1
+            out.notes.append(f"element {index}: no faces declared; element skipped.")
+            continue
+
+        cube: dict[str, Any] = {
+            "origin": origin,
+            "size": size,
+            "uv": uv_map,
+        }
+        rotation = _rotation(element, out.notes, index)
+        if rotation:
+            rot, pivot, fractional, angle_value = rotation
+            cube["rotation"], cube["pivot"] = rot, pivot
+            if fractional:
+                out.approximated = True
+                out.notes.append(
+                    f"element {index}: {angle_value:g}° rotation is kept, "
+                    "but Bedrock shades rotated cubes from their unrotated box, so lighting may look flat."
+                )
+        if len(used_materials) == 1:
+            cube["material"] = next(iter(used_materials))
+        if size[0] == 0 or size[2] == 0:
+            cube["inflate"] = 0.0
+        out.cubes.append(cube)
+
+    return out
+
+
+def build_geometry(
+    identifier: str,
+    cubes: list[dict[str, Any]],
+    texture_size: tuple[int, int] = (16, 16),
+    visible_height: float = 2.5,
+) -> dict[str, Any]:
+    """Wrap cubes in a Bedrock geometry document."""
+    # ``uv_rotation`` on a face only exists from 1.16.0 on; everything else
+    # stays on 1.12.0 so the widest range of Bedrock builds can load it.
+    needs_116 = any(
+        "uv_rotation" in face
+        for cube in cubes
+        for face in (cube.get("uv") or {}).values()
+        if isinstance(face, dict)
+    )
+    return {
+        "format_version": "1.16.0" if needs_116 else "1.12.0",
+        "minecraft:geometry": [
+            {
+                "description": {
+                    "identifier": identifier,
+                    "texture_width": texture_size[0],
+                    "texture_height": texture_size[1],
+                    "visible_bounds_width": 3,
+                    "visible_bounds_height": visible_height,
+                    "visible_bounds_offset": [0, visible_height / 2, 0],
+                },
+                "bones": [
+                    {
+                        "name": "block",
+                        "pivot": [0, 0, 0],
+                        "cubes": cubes,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def collision_box(cubes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """A single axis-aligned box around every cube, in block units."""
+    if not cubes:
+        return None
+    low = [float("inf")] * 3
+    high = [float("-inf")] * 3
+    for cube in cubes:
+        origin = cube.get("origin") or []
+        size = cube.get("size") or []
+        if len(origin) != 3 or len(size) != 3:
+            continue
+        if cube.get("rotation"):
+            return None  # a rotated cube is not axis-aligned; do not claim a box
+        for axis in range(3):
+            low[axis] = min(low[axis], origin[axis])
+            high[axis] = max(high[axis], origin[axis] + size[axis])
+    if any(value == float("inf") for value in low):
+        return None
+    rounded = [round(value, 3) for value in low + high]
+    return {
+        "origin": [rounded[0], rounded[1], rounded[2]],
+        "size": [rounded[3] - rounded[0], rounded[4] - rounded[1], rounded[5] - rounded[2]],
+    }

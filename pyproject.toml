@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "j2b-studio"
+version = "1.1.0"
+description = "Convert Java Edition mod assets into a Bedrock add-on, with an honest fidelity report"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["minecraft", "bedrock", "modding", "converter"]
+dependencies = []
+
+[project.scripts]
+j2b = "j2b.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["j2b*"]
+
+[tool.setuptools.package-data]
+j2b = ["py.typed", "knowledge/data/*.jsonl"]
+"j2b.knowledge" = ["data/*.jsonl"]

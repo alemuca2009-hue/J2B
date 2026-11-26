@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+j2b_output/
+*.sqlite3
+knowledge_overlay.json
+knowledge_suggestions.json
+.pytest_cache/
+.DS_Store

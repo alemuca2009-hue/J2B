@@ -1,0 +1,146 @@
+"""Builds a synthetic Fabric mod jar used by the end-to-end test.
+
+Keeping the fixture as code means the test mod can never drift out of sync with
+the scanner (or quietly disappear).
+"""
+
+from __future__ import annotations
+
+import json
+import struct
+import zipfile
+import zlib
+from pathlib import Path
+
+
+def _png(size: int = 16, colour: tuple[int, int, int] = (192, 32, 64)) -> bytes:
+    raw = b"".join(b"\x00" + bytes(colour) * size for _ in range(size))
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def build(path: str | Path) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    png = _png()
+
+    text_files = {
+        "fabric.mod.json": json.dumps(
+            {
+                "id": "testmod",
+                "name": "Test Mod",
+                "version": "1.0.0",
+                "description": "Synthetic fixture for the converter tests.",
+                "authors": ["J2B"],
+                "depends": {"minecraft": ">=1.20", "fabricloader": ">=0.15"},
+            },
+            indent=2,
+        ),
+        "assets/testmod/lang/en_us.json": json.dumps(
+            {
+                "block.testmod.ruby_ore": "Ruby Ore",
+                "block.testmod.ruby_flower": "Ruby Flower",
+                "item.testmod.ruby": "Ruby",
+                "item.testmod.ruby_pickaxe": "Ruby Pickaxe",
+                "entity.testmod.ruby_golem": "Ruby Golem",
+            },
+            indent=2,
+        ),
+        "assets/testmod/blockstates/ruby_ore.json": json.dumps(
+            {"variants": {"": {"model": "testmod:block/ruby_ore"}}}
+        ),
+        "assets/testmod/models/block/ruby_ore.json": json.dumps(
+            {"parent": "minecraft:block/cube_all", "textures": {"all": "testmod:block/ruby_ore"}}
+        ),
+        "assets/testmod/blockstates/ruby_flower.json": json.dumps(
+            {"variants": {"": {"model": "testmod:block/ruby_flower"}}}
+        ),
+        "assets/testmod/models/block/ruby_flower.json": json.dumps(
+            {"parent": "minecraft:block/cross", "textures": {"cross": "testmod:block/ruby_flower"}}
+        ),
+        "assets/testmod/models/item/ruby.json": json.dumps(
+            {"parent": "minecraft:item/generated", "textures": {"layer0": "testmod:item/ruby"}}
+        ),
+        "assets/testmod/models/item/ruby_pickaxe.json": json.dumps(
+            {"parent": "minecraft:item/handheld", "textures": {"layer0": "testmod:item/ruby_pickaxe"}}
+        ),
+        "data/testmod/recipes/ruby_block.json": json.dumps(
+            {
+                "type": "minecraft:crafting_shaped",
+                "pattern": ["###", "###", "###"],
+                "key": {"#": {"tag": "minecraft:planks"}},
+                "result": {"item": "testmod:ruby", "count": 1},
+            }
+        ),
+        "data/testmod/recipes/ruby_pickaxe.json": json.dumps(
+            {
+                "type": "minecraft:crafting_shaped",
+                "pattern": ["###", " | ", " | "],
+                "key": {"#": {"item": "testmod:ruby"}, "|": {"item": "minecraft:stick"}},
+                "result": {"item": "testmod:ruby_pickaxe", "count": 1},
+            }
+        ),
+        "data/testmod/recipes/ruby_smithing.json": json.dumps(
+            {
+                "type": "minecraft:smithing_transform",
+                "template": {"item": "minecraft:netherite_upgrade_smithing_template"},
+                "base": {"item": "testmod:ruby"},
+                "addition": {"item": "minecraft:diamond"},
+                "result": {"item": "testmod:ruby_pickaxe"},
+            }
+        ),
+        "data/testmod/worldgen/configured_feature/ruby_ore.json": json.dumps(
+            {
+                "type": "minecraft:ore",
+                "config": {
+                    "size": 9,
+                    "targets": [
+                        {"target": {"block": "minecraft:stone"}, "state": {"Name": "testmod:ruby_ore"}}
+                    ],
+                },
+            }
+        ),
+        "data/testmod/worldgen/placed_feature/ruby_ore_placed.json": json.dumps(
+            {
+                "feature": "testmod:ruby_ore",
+                "placement": [
+                    {"type": "minecraft:count", "count": 4},
+                    {"type": "minecraft:in_square"},
+                    {
+                        "type": "minecraft:height_range",
+                        "height": {
+                            "type": "minecraft:trapezoid",
+                            "min_inclusive": {"absolute": -60},
+                            "max_inclusive": {"absolute": 40},
+                        },
+                    },
+                ],
+            }
+        ),
+        "data/testmod/worldgen/configured_feature/ruby_tree.json": json.dumps({"type": "minecraft:tree", "config": {}}),
+        "testmod.mixins.json": json.dumps({"required": True, "package": "com.test.mixin", "mixins": ["FooMixin"]}),
+    }
+
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in text_files.items():
+            archive.writestr(name, content)
+        for texture in (
+            "assets/testmod/textures/block/ruby_ore.png",
+            "assets/testmod/textures/block/ruby_flower.png",
+            "assets/testmod/textures/item/ruby.png",
+            "assets/testmod/textures/item/ruby_pickaxe.png",
+        ):
+            archive.writestr(texture, png)
+        # Class files only carry names; the scanner must treat them as hints.
+        for cls in ("com/test/FooScreen.class", "com/test/FooCommand.class", "com/test/FooKeyMapping.class"):
+            archive.writestr(cls, b"\xca\xfe\xba\xbe" + b"\x00" * 64)
+    return target
