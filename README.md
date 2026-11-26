@@ -25,7 +25,8 @@ python -m j2b convert mods/ruby.jar -o out
 | Smithing recipe | — | **unsupported** — no Bedrock schema |
 | Ore configured + placed feature | BP `ore_feature` + `feature_rules` | **converted** |
 | Tree / structure / biome worldgen | — | **manual** — must be rebuilt |
-| Entity (mob) | texture copied as reference | **manual** — model, AI and loot are code |
+| Entity with a GeckoLib or `.bbmodel` file | RP geometry + texture | **partial** — bones and UVs are the author's; health, hitbox, loot and AI are code |
+| Entity whose model exists only as a Java class | texture copied as reference | **manual** — nothing to translate |
 | GUI screen / menu, command, keybind, particle, dimension | — | **manual / unsupported** |
 
 Nothing is invented. If a texture is missing from the jar, the block still generates but is marked

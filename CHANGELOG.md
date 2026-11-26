@@ -3,6 +3,35 @@
 All notable changes to J2B Studio. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning is [semantic](https://semver.org/).
 
+## [1.3.0] — 2026-11-26
+
+### Added
+- **Entity models convert.** A mod that ships its mob as GeckoLib (`.geo.json`) or a Blockbench
+  project (`.bbmodel`) now gets real Bedrock geometry in the resource pack instead of a note
+  saying to rebuild it. GeckoLib is renamed and otherwise untouched -- bones, pivots and UVs are
+  the author's, and any edit to them would be a bug. `.bbmodel` stores elements in the Java
+  element schema, so the cube converter does the geometry and the outliner group tree becomes
+  bones; elements the outliner does not reference go on a `root` bone rather than being dropped.
+  Models are matched to entities by filename. An entity with a model is reported `partial` at
+  0.5, one without stays `manual` at 0.15. The behaviour half (health, hitbox, spawn rules, loot,
+  AI goals) is Java code and is still not recovered -- the report says so per entity.
+
+### Fixed
+- **Every block model was mirrored east to west.** Bedrock block geometry is defined in a space
+  that mirrors X relative to Java's; J2B applied only the `-8` centring shift. Symmetric models
+  (most pillars, many machine casings) looked correct, which is why this survived: the symptom
+  only appears on asymmetric geometry -- a stair, a pipe joint, a door hinge, a shaft keyed on
+  one side. Three conversions are now exact: `origin.x = 8 - to.x`, `pivot.x = 8 -
+  rotation.origin.x`, and a rotation negated on X and Y with Z kept (mirroring X conjugates the
+  rotation, so Java's `axis: x, angle: 22.5` is Bedrock's `[-22.5, 0, 0]` while `axis: z` keeps
+  its sign). The rules come from Blockbench's `compileCube`/`compileGroup`, GeyserMC
+  PackConverter, Kas-tle `java2bedrock.sh` and `mc-model-geo` -- four implementations that agree
+  with each other and with the game. `tests/test_geometry.py` pins them to vanilla `block/cross`
+  as Blockbench exports it.
+- **`CaseMemory` leaked a SQLite connection per recorded case.** A Create conversion opened
+  2 890 connections and paid 2 890 fsyncs; it now keeps one connection per run and buffers rows
+  into a single transaction.
+
 ## [1.2.1] — 2026-11-26
 
 ### Fixed
