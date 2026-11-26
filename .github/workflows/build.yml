@@ -90,16 +90,30 @@ jobs:
           # Start-Process -Wait -PassThru gives the real exit code, and the
           # self-test writes a JSON report so the log shows what was checked
           # rather than just "exit 0".
+          # The size floor is per kind, because the two builds put the payload in
+          # different places. --onefile carries the whole interpreter (~12 MB);
+          # --onedir ships a ~2 MB launcher with the interpreter in _internal\.
+          # A single 3 MB threshold rejected the portable stub twice on builds
+          # whose one-file twin had just passed every probe.
           $targets = @(
-            @{ Path = "dist\J2BStudio.exe";                        Kind = "one-file" },
-            @{ Path = "dist\J2BStudio-portable\J2BStudio-portable.exe"; Kind = "portable" }
+            @{ Path = "dist\J2BStudio.exe";                             Kind = "one-file"; MinExe = 8MB }
+            @{ Path = "dist\J2BStudio-portable\J2BStudio-portable.exe"; Kind = "portable"; MinExe = 1MB; MinDir = 8MB }
           )
           $failed = @()
           foreach ($t in $targets) {
             if (-not (Test-Path $t.Path)) { throw "$($t.Kind) build was not produced: $($t.Path)" }
             $size = (Get-Item $t.Path).Length
             Write-Host "$($t.Kind): $($t.Path) - $([math]::Round($size/1MB,2)) MB"
-            if ($size -lt 3MB) { throw "$($t.Kind) exe is suspiciously small: $size bytes" }
+            if ($size -lt $t.MinExe) { throw "$($t.Kind) exe is suspiciously small: $size bytes (floor $($t.MinExe))" }
+            if ($t.ContainsKey("MinDir")) {
+              $dir = Split-Path $t.Path -Parent
+              $total = (Get-ChildItem $dir -Recurse -File | Measure-Object -Property Length -Sum).Sum
+              Write-Host "$($t.Kind): folder $dir - $([math]::Round($total/1MB,2)) MB"
+              if ($total -lt $t.MinDir) { throw "$($t.Kind) folder is suspiciously small: $total bytes" }
+              if (-not (Test-Path (Join-Path $dir "_internal"))) {
+                $failed += "$($t.Kind): _internal folder missing -- the one-dir payload was not collected"
+              }
+            }
 
             $report = Join-Path $env:RUNNER_TEMP "selftest-$($t.Kind).json"
             if (Test-Path $report) { Remove-Item $report -Force }
