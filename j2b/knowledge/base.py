@@ -168,6 +168,9 @@ KNOWN_SIGNALS: frozenset[str] = frozenset(
         "tag:convention", "tag:c", "tag:forge", "tag:neoforge",
         # Authoritative blockstate structure, read from the blockstate file.
         "blockstate:rotated", "blockstate:multipart",
+        # Where an entity's model came from: the difference between "rebuild the
+        # mob by hand" and "only the behaviour is missing".
+        "entity:model_file", "entity:geckolib", "entity:bbmodel",
     }
 )
 
@@ -324,6 +327,15 @@ def derive_signals(feature: Feature) -> set[str]:
             signals.add("feature:ore")
 
     elif feature.kind == "entity":
+        models = [str(path).lower() for path in data.get("model_candidates") or []]
+        if models:
+            # A shipped model file is the difference between "rebuild this mob
+            # by hand" and "only the behaviour is missing".
+            signals.add("entity:model_file")
+            if any(path.endswith(".bbmodel") for path in models):
+                signals.add("entity:bbmodel")
+            if any(path.endswith(".geo.json") for path in models):
+                signals.add("entity:geckolib")
         if any(needle in hay for needle in ("projectile", "arrow", "bolt", "fireball")):
             signals.add("projectile")
         if "boss" in hay:

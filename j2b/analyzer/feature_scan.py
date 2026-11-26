@@ -36,6 +36,29 @@ def _class_hint(simple_name: str) -> tuple[str, str] | None:
     return None
 
 
+def _match_models(models: list[str], entity_name: str) -> list[str]:
+    """Models whose filename points at this entity, best match first.
+
+    A model is claimed by name, because a jar gives no other link between
+    ``ruby_golem.geo.json`` and the entity ``ruby_golem``. Exact stems beat
+    prefix matches, and a model that matches two entities is left to both --
+    reporting a shared rig is better than picking one arbitrarily.
+    """
+    scored: list[tuple[int, str]] = []
+    for path in models:
+        stem = path.rsplit("/", 1)[-1]
+        for suffix in (".geo.json", ".bbmodel", ".json"):
+            if stem.lower().endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        stem = stem.lower()
+        if stem == entity_name:
+            scored.append((0, path))
+        elif stem.startswith(entity_name) or entity_name in stem:
+            scored.append((1, path))
+    return [path for _score, path in sorted(scored)]
+
+
 class ModScanner:
     def __init__(self, archive: ModArchive) -> None:
         self.archive = archive
@@ -224,6 +247,7 @@ class ModScanner:
                 found.add(key.split(".", 2)[-1])
         for name in self.archive.iter_files(f"data/{namespace}/entity_type/", ".json"):
             found.add(name.rsplit("/", 1)[-1][:-5])
+        models = self._entity_models(namespace)
         for entity_name in sorted(found):
             candidates = [
                 f"assets/{namespace}/textures/entity/{entity_name}.png",
@@ -241,9 +265,26 @@ class ModScanner:
                     data={
                         "texture_candidates": textures,
                         "entity_type_json": entity_type or {},
+                        "model_candidates": _match_models(models, entity_name),
                     },
                 )
             )
+
+    def _entity_models(self, namespace: str) -> list[str]:
+        """Every model file in the mod that could describe an entity.
+
+        GeckoLib and Blockbench both put their models wherever the author felt
+        like, so this does not assume a directory: it collects the two formats
+        from anywhere under ``assets/`` and matches them to entities by name.
+        """
+        models: list[str] = []
+        for name in self.archive.names(f"assets/{namespace}/"):
+            lowered = name.lower()
+            if lowered.endswith((".geo.json", ".bbmodel")) or (
+                lowered.endswith(".json") and "/models/entity/" in lowered
+            ):
+                models.append(name)
+        return models
 
     # -- classes ----------------------------------------------------------
     def _scan_classes(self) -> None:
