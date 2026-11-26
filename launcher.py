@@ -35,9 +35,9 @@ def main() -> int:
     _ensure_streams()
 
     if "--j2b-selftest" in sys.argv:
-        from j2b.selftest import run
+        from j2b.selftest import _report_path_from_argv, run
 
-        return run()
+        return run(_report_path_from_argv(sys.argv[1:]))
 
     if len(sys.argv) > 1:
         from j2b.cli import main as cli_main

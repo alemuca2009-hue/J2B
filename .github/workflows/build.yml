@@ -81,19 +81,53 @@ jobs:
             --exclude-module numpy --exclude-module PIL --exclude-module pytest `
             launcher.py
 
-      - name: Verify the binary starts
+      - name: Verify the binaries start
         shell: pwsh
         run: |
-          # A windowed exe has no console, so the check is its self-test exit code:
-          # it asserts tkinter, the packed knowledge base and the texture atlas.
-          $exe = "dist\J2BStudio.exe"
-          if (-not (Test-Path $exe)) { throw "exe was not produced" }
-          $size = (Get-Item $exe).Length
-          Write-Host "exe size: $([math]::Round($size/1MB,1)) MB"
-          if ($size -lt 3MB) { throw "exe is suspiciously small: $size bytes" }
-          & $exe --j2b-selftest
-          if ($LASTEXITCODE -ne 0) { throw "self-test failed with exit code $LASTEXITCODE" }
-          Write-Host "self-test passed"
+          # A windowed exe has no console, and PowerShell does not wait for a GUI
+          # subsystem process -- `& $exe` returns immediately with an empty
+          # $LASTEXITCODE, which is why this check used to fail on a good build.
+          # Start-Process -Wait -PassThru gives the real exit code, and the
+          # self-test writes a JSON report so the log shows what was checked
+          # rather than just "exit 0".
+          $targets = @(
+            @{ Path = "dist\J2BStudio.exe";                        Kind = "one-file" },
+            @{ Path = "dist\J2BStudio-portable\J2BStudio-portable.exe"; Kind = "portable" }
+          )
+          $failed = @()
+          foreach ($t in $targets) {
+            if (-not (Test-Path $t.Path)) { throw "$($t.Kind) build was not produced: $($t.Path)" }
+            $size = (Get-Item $t.Path).Length
+            Write-Host "$($t.Kind): $($t.Path) - $([math]::Round($size/1MB,2)) MB"
+            if ($size -lt 3MB) { throw "$($t.Kind) exe is suspiciously small: $size bytes" }
+
+            $report = Join-Path $env:RUNNER_TEMP "selftest-$($t.Kind).json"
+            if (Test-Path $report) { Remove-Item $report -Force }
+            $proc = Start-Process -FilePath $t.Path -ArgumentList "--j2b-selftest", "--j2b-selftest-report=$report" -Wait -PassThru
+            Write-Host "$($t.Kind) exit code: $($proc.ExitCode)"
+
+            if (Test-Path $report) {
+              $json = Get-Content $report -Raw | ConvertFrom-Json
+              Write-Host "version: $($json.version)  python: $($json.python)  ok: $($json.ok)"
+              foreach ($c in $json.checks) {
+                Write-Host ("  {0,-16} {1}  {2}" -f $c.name, $(if ($c.ok) { "ok  " } else { "FAIL" }), $c.detail)
+              }
+              if (-not $json.ok) { $failed += "$($t.Kind): self-test reported failures" }
+            } else {
+              $failed += "$($t.Kind): no JSON report written (exit $($proc.ExitCode))"
+            }
+            if ($proc.ExitCode -ne 0) { $failed += "$($t.Kind): exit code $($proc.ExitCode)" }
+          }
+          if ($failed.Count -gt 0) { throw ($failed -join "; ") }
+          Write-Host "both binaries passed the self-test"
+
+      - name: Keep the self-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-reports
+          path: ${{ runner.temp }}/selftest-*.json
+          if-no-files-found: warn
 
       - name: Package
         shell: pwsh
