@@ -540,11 +540,15 @@ def _convert_machine_recipe(
     raw_ingredients = _ingredient_list(payload)
     if not raw_ingredients:
         feature.set_result("unsupported", 0.0, "recipe_invalid")
+        # Severity is "warning", not "error": nothing invalid reached the pack.
+        # An error here made the validator report a broken add-on when the add-on
+        # was in fact clean and this recipe had simply been left out.
         feature.add_issue(
-            "error",
-            "RECIPE_INVALID",
+            "warning",
+            "RECIPE_FLUID_ONLY",
             "The machine recipe has no item inputs (it may consume only fluid).",
-            "No recipe was written: Bedrock cannot express a fluid-only craft.",
+            "No recipe was written: Bedrock cannot express a fluid-only craft. "
+            "The machine still works, this one process just has to be done by hand.",
         )
         ctx.count("recipes_unsupported")
         return

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from itertools import product
 from typing import Any
 
+from .rotation import bake_box, blockstate_placement, element_placement
+
 FACE_NORMALS = {
     "north": (0, 0, -1),
     "south": (0, 0, 1),
@@ -253,10 +255,17 @@ def rotate_elements(elements: list[dict[str, Any]], x_deg: float, y_deg: float) 
 
     The UVs travel with their face — the texture is glued to the quad, exactly
     as Java rotates it — so only the face names and the box bounds change.
+
+    Elements that carry their own ``rotation`` are *composed* with the
+    blockstate's, not overwritten: the pair collapses into one rotation (see
+    ``rotation.compose``), the quarter-turn part of it is folded into the box and
+    whatever fractional angle is left is handed to Bedrock as a normal
+    ``rotation`` about the pivot it actually turns around. That keeps a cog
+    tilted 22.5° tilted when the block is also facing east.
     """
     if not x_deg and not y_deg:
         return elements
-    centre = (8.0, 8.0, 8.0)
+    variant = blockstate_placement(x_deg, y_deg)
     rotated: list[dict[str, Any]] = []
     for element in elements:
         if not isinstance(element, dict):
@@ -266,32 +275,22 @@ def rotate_elements(elements: list[dict[str, Any]], x_deg: float, y_deg: float) 
         if not isinstance(low, (list, tuple)) or not isinstance(high, (list, tuple)) or len(low) != 3 or len(high) != 3:
             rotated.append(element)
             continue
-        corners = [
-            _rotate_point([low[0], low[1], low[2]], x_deg, y_deg, centre),
-            _rotate_point([high[0], low[1], low[2]], x_deg, y_deg, centre),
-            _rotate_point([low[0], high[1], low[2]], x_deg, y_deg, centre),
-            _rotate_point([low[0], low[1], high[2]], x_deg, y_deg, centre),
-            _rotate_point([high[0], high[1], low[2]], x_deg, y_deg, centre),
-            _rotate_point([high[0], low[1], high[2]], x_deg, y_deg, centre),
-            _rotate_point([low[0], high[1], high[2]], x_deg, y_deg, centre),
-            _rotate_point([high[0], high[1], high[2]], x_deg, y_deg, centre),
-        ]
-        new_low = [round(min(corner[axis] for corner in corners), 6) for axis in range(3)]
-        new_high = [round(max(corner[axis] for corner in corners), 6) for axis in range(3)]
         faces = element.get("faces") if isinstance(element.get("faces"), dict) else {}
-        new_faces: dict[str, Any] = {}
-        for face, spec in faces.items():
-            new_faces[_rotate_face(face, x_deg, y_deg)] = spec
-        new_element = {key: value for key, value in element.items() if key not in ("from", "to", "faces")}
-        new_element["from"] = new_low
-        new_element["to"] = new_high
-        new_element["faces"] = new_faces
-        rotation = element.get("rotation")
-        if isinstance(rotation, dict) and rotation.get("angle"):
-            # An element-level rotation inside a rotated model is beyond what can be
-            # re-derived safely; the element keeps its box and the caller reports it.
-            new_element["j2b_element_rotation"] = rotation
-            new_element.pop("rotation", None)
+        own = element_placement(element)
+        total = own.then(variant) if own is not None else variant
+        baked = bake_box([float(value) for value in low], [float(value) for value in high], faces, total)
+        new_element = {key: value for key, value in element.items() if key not in ("from", "to", "faces", "rotation")}
+        new_element["from"] = [round(value, 6) for value in baked.low]
+        new_element["to"] = [round(value, 6) for value in baked.high]
+        new_element["faces"] = baked.faces
+        if baked.residual_axis and abs(baked.residual_angle) > 1e-9:
+            new_element["rotation"] = {
+                "origin": list(baked.residual_pivot or [8.0, 8.0, 8.0]),
+                "axis": baked.residual_axis,
+                "angle": round(baked.residual_angle, 9),
+            }
+        if not baked.exact and baked.note:
+            new_element["j2b_rotation_note"] = baked.note
         rotated.append(new_element)
     return rotated
 

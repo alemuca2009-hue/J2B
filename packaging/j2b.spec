@@ -20,8 +20,11 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 # Bundle the knowledge base next to the code so the frozen exe can read it.
+# Both data dirs are read with ``Path(__file__).with_name("data")``, so they must
+# land at the same relative path inside the bundle, not next to the exe.
 datas = [
     (os.path.join(ROOT, "j2b", "knowledge", "data"), os.path.join("j2b", "knowledge", "data")),
+    (os.path.join(ROOT, "j2b", "data"), os.path.join("j2b", "data")),
 ]
 readme = os.path.join(ROOT, "README.md")
 if os.path.exists(readme):

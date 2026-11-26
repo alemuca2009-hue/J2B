@@ -1,0 +1,118 @@
+# Windows build: one-file exe for download, one-dir folder for portable use.
+#
+# Runs on a tag (`v1.2.0`) to publish, or by hand from the Actions tab to check a
+# change without tagging. Nothing here needs a secret: the repo token that
+# Actions provides is enough to attach files to a Release.
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      attach_to_release:
+        description: "Upload the exe to a Release named after the tag (leave empty to keep artifacts only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: tests (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -q --upgrade pip && python -m pip install -q -e .
+      - name: Run tests
+        run: python -m pytest -q
+
+  windows:
+    name: windows exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Install
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q pyinstaller
+          python -m pip install -q -e .
+
+      - name: Show version
+        run: python -c "import j2b.version as v; print(v.__version__)"
+
+      - name: Smoke test before freezing
+        run: |
+          python -m j2b --version
+          python -m j2b convert --help
+
+      - name: Build one-file exe
+        run: python -m PyInstaller --noconfirm --clean packaging/j2b.spec
+
+      - name: Build portable folder
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onedir --windowed `
+            --name J2BStudio-portable `
+            --add-data "j2b/knowledge/data;j2b/knowledge/data" `
+            --add-data "j2b/data;j2b/data" `
+            --hidden-import tkinter --hidden-import tkinter.ttk `
+            --hidden-import tkinter.filedialog --hidden-import tkinter.messagebox `
+            --exclude-module numpy --exclude-module PIL --exclude-module pytest `
+            launcher.py
+
+      - name: Verify the binary starts
+        shell: pwsh
+        run: |
+          # A windowed exe has no console, so the check is its self-test exit code:
+          # it asserts tkinter, the packed knowledge base and the texture atlas.
+          $exe = "dist\J2BStudio.exe"
+          if (-not (Test-Path $exe)) { throw "exe was not produced" }
+          $size = (Get-Item $exe).Length
+          Write-Host "exe size: $([math]::Round($size/1MB,1)) MB"
+          if ($size -lt 3MB) { throw "exe is suspiciously small: $size bytes" }
+          & $exe --j2b-selftest
+          if ($LASTEXITCODE -ne 0) { throw "self-test failed with exit code $LASTEXITCODE" }
+          Write-Host "self-test passed"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = (python -c "import j2b.version as v; print(v.__version__)").Trim()
+          Copy-Item dist\J2BStudio.exe "dist\J2BStudio-$v-windows-x64.exe"
+          Compress-Archive -Path dist\J2BStudio-portable\* -DestinationPath "dist\J2BStudio-$v-portable-windows-x64.zip" -Force
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: J2BStudio-windows-x64
+          path: |
+            dist/J2BStudio-*.exe
+            dist/J2BStudio-*-portable-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/J2BStudio-*.exe
+            dist/J2BStudio-*-portable-windows-x64.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
