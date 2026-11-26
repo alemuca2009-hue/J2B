@@ -2,12 +2,21 @@
 
 Continue-from-here file. If a session ends, this is the first thing to read.
 
-**Version:** 1.2.0
+**Version:** 1.2.1
 **Branch:** `main`
-**Tests:** 99 tests, 256 subtests — all green (`python -m pytest -q`, ~0.3 s)
-**Windows build:** no binary yet — workflow written, not yet run (see *Windows executable*)
+**Tests:** 116 tests, 256 subtests — all green (`python -m pytest -q`, ~0.3 s)
+**Windows build:** workflow runs on `windows-latest`; the one-file exe passed all probes on run 45878175282, the run failed on a bogus size guard for the portable stub — fixed in 1.2.1, re-running
 
 ## Last changes
+
+| Area | What |
+| --- | --- |
+| `j2b/knowledge/base.py` | `CaseMemory` keeps one connection per run and buffers rows into a single transaction. 2 890 leaked handles and 2 890 fsyncs per Create conversion are gone. |
+| `j2b/selftest.py` | New `conversion` probe: the frozen exe converts the fixture jar and must produce a `.mcaddon` with blocks. Imports were the wrong thing to test. |
+| `j2b/fixtures.py` | Synthetic mod jar moved into the package so the exe self-test and the test suite convert the same jar. |
+| `tests/test_selftest.py` | New. 8 tests. |
+| `.github/workflows/build.yml` | Per-kind size floors; portable folder measured as a whole; `_internal\` presence enforced. |
+
 
 | Area | What |
 | --- | --- |

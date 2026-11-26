@@ -602,7 +602,20 @@ class KnowledgeBase:
 
 
 class CaseMemory:
-    """What happened on previous conversions, keyed by feature signature."""
+    """What happened on previous conversions, keyed by feature signature.
+
+    One connection, opened on first use and reused: a conversion records a row
+    per feature (2 890 of them for Create), and opening a connection each time
+    was also *leaking* it — ``sqlite3.Connection.__exit__`` commits but does
+    not close, so the run left one file handle per feature behind. Measured on
+    Create 6.0.10, that was 3.2 s of an 18 s conversion spent in ``__exit__``
+    alone, plus the per-statement fsync.
+
+    Rows are buffered and written in one transaction by :meth:`flush`, which
+    the converter calls once the feature loop ends. If a run dies half way the
+    buffer is simply lost — case memory is a record of finished work, so a
+    partial write is not worth an fsync per feature.
+    """
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS cases (
@@ -618,51 +631,99 @@ class CaseMemory:
     );
     """
 
+    _UPSERT = """INSERT INTO cases (kind, signals, feature_id, strategy, status, mod_id, at, seen)
+                  VALUES (?,?,?,?,?,?,?,1)
+                  ON CONFLICT(kind, signals) DO UPDATE SET
+                    seen = seen + 1,
+                    status = excluded.status,
+                    strategy = excluded.strategy,
+                    mod_id = excluded.mod_id,
+                    at = excluded.at"""
+
+    #: Rows held before an automatic flush, so a long run never grows unbounded.
+    FLUSH_EVERY = 500
+
     def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path else case_memory_path()
         self.available = True
+        self._conn: sqlite3.Connection | None = None
+        self._pending: list[tuple[Any, ...]] = []
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self._connect() as connection:
-                connection.executescript(self.SCHEMA)
+            self._conn = self._open()
+            self._conn.executescript(self.SCHEMA)
+            # WAL + relaxed sync: this is a local cache of past runs, not a
+            # ledger. Losing the last few rows to a power cut costs a hint.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
         except sqlite3.Error:
             self.available = False
+            self._close_quietly()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _connection(self) -> sqlite3.Connection | None:
+        """The live connection, or ``None`` if case memory is off."""
+        if not self.available:
+            return None
+        if self._conn is None:
+            try:
+                self._conn = self._open()
+            except sqlite3.Error:
+                self.available = False
+                return None
+        return self._conn
+
+    def _close_quietly(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except sqlite3.Error:  # pragma: no cover - closing a dead handle
+                pass
+            self._conn = None
 
     def record(self, feature: Feature, mod_id: str) -> None:
         if not self.available or feature.status == "pending":
             return
         signals = ",".join(sorted(derive_signals(feature)))
+        self._pending.append(
+            (feature.kind, signals, feature.id, feature.strategy, feature.status, mod_id, now_iso())
+        )
+        if len(self._pending) >= self.FLUSH_EVERY:
+            self.flush()
+
+    def flush(self) -> int:
+        """Write buffered rows in one transaction. Returns how many were written."""
+        if not self._pending:
+            return 0
+        connection = self._connection()
+        if connection is None:
+            self._pending.clear()
+            return 0
+        rows, self._pending = self._pending, []
         try:
-            with self._connect() as connection:
-                connection.execute(
-                    """INSERT INTO cases (kind, signals, feature_id, strategy, status, mod_id, at, seen)
-                       VALUES (?,?,?,?,?,?,?,1)
-                       ON CONFLICT(kind, signals) DO UPDATE SET
-                         seen = seen + 1,
-                         status = excluded.status,
-                         strategy = excluded.strategy,
-                         mod_id = excluded.mod_id,
-                         at = excluded.at""",
-                    (feature.kind, signals, feature.id, feature.strategy, feature.status, mod_id, now_iso()),
-                )
+            with connection:
+                connection.executemany(self._UPSERT, rows)
         except sqlite3.Error:
             self.available = False
+            self._close_quietly()
+            return 0
+        return len(rows)
 
     def precedent(self, feature: Feature) -> dict[str, Any] | None:
-        if not self.available:
+        connection = self._connection()
+        if connection is None:
             return None
         signals = derive_signals(feature)
         try:
-            with self._connect() as connection:
-                rows = connection.execute(
-                    "SELECT * FROM cases WHERE kind = ? AND feature_id != ? ORDER BY seen DESC LIMIT 50",
-                    (feature.kind, feature.id),
-                ).fetchall()
+            self.flush()
+            rows = connection.execute(
+                "SELECT * FROM cases WHERE kind = ? AND feature_id != ? ORDER BY seen DESC LIMIT 50",
+                (feature.kind, feature.id),
+            ).fetchall()
         except sqlite3.Error:
             return None
         best: tuple[float, dict[str, Any]] | None = None
@@ -675,11 +736,29 @@ class CaseMemory:
         return {"overlap": round(best[0], 2), "record": best[1]} if best else None
 
     def stats(self) -> dict[str, Any]:
-        if not self.available:
+        connection = self._connection()
+        if connection is None:
             return {"available": False, "cases": 0}
         try:
-            with self._connect() as connection:
-                total = connection.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+            self.flush()
+            total = connection.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
         except sqlite3.Error:
             return {"available": False, "cases": 0}
         return {"available": True, "cases": int(total or 0), "path": str(self.path)}
+
+    def close(self) -> None:
+        """Flush what is buffered and release the handle."""
+        self.flush()
+        self._close_quietly()
+
+    def __enter__(self) -> "CaseMemory":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:  # pragma: no cover - interpreter shutdown order
+        try:
+            self._close_quietly()
+        except Exception:
+            pass

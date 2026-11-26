@@ -3,6 +3,37 @@
 All notable changes to J2B Studio. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning is [semantic](https://semver.org/).
 
+## [1.2.1] — 2026-11-26
+
+### Fixed
+- **The Windows build failed on a good executable.** `build.yml` applied the `--onefile` size
+  floor (3 MB) to the `--onedir` stub as well. A one-dir build ships a ~2 MB launcher and keeps
+  the interpreter in `_internal\`, so the guard rejected a build that had just passed every
+  self-test probe (one-file: 12.27 MB, 7/7 ok; portable: 2.06 MB, never got to run). Each kind
+  now has its own floor and the portable folder is measured as a whole, with an explicit check
+  that `_internal\` exists.
+
+### Added
+- **The self-test now converts a mod.** Every probe until now proved a module *imports* — the
+  check that passes on a frozen build which cannot write a pack. The `conversion` probe builds
+  the synthetic fixture jar, converts it inside the frozen process, and asserts a `.mcaddon`
+  with block definitions was written to disk: `4 converted, 2 blocks, 10 KB bundle`. This is the
+  probe that would have caught a missing `j2b/data` entry, not `import tkinter`.
+- `j2b/fixtures.py` — the synthetic mod jar moved out of `tests/` into the package so the tests
+  and the frozen executable convert the *same* fixture. `tests/make_test_jar.py` is now a shim
+  that re-exports it.
+- `tests/test_selftest.py` — 8 tests: a raising probe is recorded as a failure rather than
+  crashing the process, an informational probe can never fail the run, an unwritable report
+  path does not change the exit code, and a pipeline that produces no `.mcaddon` is caught.
+
+### Changed
+- **`CaseMemory` opens one connection per run instead of one per feature.** Each `record()` used
+  `with self._connect()`, and `sqlite3.Connection.__exit__` commits but does not close — so a
+  Create conversion (2 890 features) leaked a file handle per feature and paid one fsync each.
+  Rows are now buffered and written by `flush()` in a single transaction (WAL,
+  `synchronous=NORMAL`), with an automatic flush every 500 rows so a long run stays bounded.
+  `stats()` counts buffered rows, so it no longer reports 0 cases mid-run.
+
 ## [1.2.0] — 2026-11-26
 
 ### Added

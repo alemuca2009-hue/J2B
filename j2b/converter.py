@@ -260,6 +260,9 @@ class Converter:
             except Exception:  # noqa: BLE001 - history is optional
                 result.stats["history"] = {"available": False}
             if self.memory is not None:
+                # One transaction for the whole run's rows instead of one per
+                # feature: see CaseMemory.record for the measurement.
+                self.memory.flush()
                 result.stats["case_memory"] = self.memory.stats()
 
             result.finished_at = now_iso()

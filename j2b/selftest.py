@@ -84,6 +84,53 @@ def _gui() -> tuple[bool, str]:
     return True, "imported"
 
 
+def _conversion() -> tuple[bool, str]:
+    """Convert the shipped fixture jar inside this process, start to finish.
+
+    Every other probe here proves a module *imports*. This one proves the
+    packaged build can do the job it exists for: read a jar, resolve models,
+    textures and recipes, and write packs to disk. A frozen build that loses a
+    data file -- or that cannot write outside its own bundle -- imports
+    perfectly and still produces nothing, and no import probe would notice.
+
+    It runs offline and inside a temporary directory, so it is safe to trigger
+    from a user's machine with ``--j2b-selftest``.
+    """
+    import tempfile
+
+    from .converter import Converter
+    from .fixtures import build
+    from .models import ConversionOptions
+
+    with tempfile.TemporaryDirectory() as tmp:
+        jar = build(Path(tmp) / "fixture.jar")
+        out = Path(tmp) / "out"
+        options = ConversionOptions(
+            output_dir=str(out),
+            make_mcaddon=True,
+            # Leave no trace in the user's case memory or knowledge overlay.
+            record_learning=False,
+            report_formats=("json",),
+        )
+        result = Converter(options).convert(jar)
+        converted = sum(1 for feature in result.features if feature.status == "converted")
+        paths = result.packs
+        if paths is None:
+            return False, "conversion produced no pack paths"
+        bundle = paths.mcaddon
+        if bundle is None or not Path(bundle).is_file():
+            return False, f"no .mcaddon was written under {out}"
+        size = Path(bundle).stat().st_size
+        if size < 2048:
+            return False, f"the .mcaddon is {size} bytes -- the pack writer produced an empty zip"
+        blocks = list((paths.bp / "blocks").glob("*.json"))
+        if not blocks:
+            return False, "the behavior pack has no block definitions"
+        if converted < 3:
+            return False, f"only {converted} features converted from the fixture jar"
+        return True, f"{converted} converted, {len(blocks)} blocks, {size // 1024} KB bundle"
+
+
 #: Probes in reporting order. Kept as data so the report and the exit code can
 #: never disagree about what was checked. The second element marks a probe as
 #: required; ``frozen`` is informational -- a source checkout is not frozen.
@@ -95,6 +142,7 @@ PROBES = (
     ("knowledge base", _knowledge, True),
     ("vanilla atlas", _atlas, True),
     ("gui module", _gui, True),
+    ("conversion", _conversion, True),
 )
 
 
