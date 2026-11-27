@@ -5,6 +5,13 @@ versioning is [semantic](https://semver.org/).
 
 ## Unreleased
 
+- Preserve child textures, display transforms and lighting during model inheritance. Resolve
+  unqualified parent names in Minecraft's namespace and restrict vanilla templates to that namespace.
+- Register borrowed vanilla textures using their official file paths, including item art used by blocks.
+- Read missing PNGs and animation metadata from the optional reference archive. The GUI and
+  `convert --reference reference.jar` expose this source alongside model resolution.
+- Use the actual copied texture path for flipbook definitions.
+
 - Convert GeckoLib bone animation clips to Bedrock resource-pack definitions. Reports identify
   exact and approximate clips, omitted fields and the output used for client-entity binding.
 

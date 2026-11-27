@@ -67,8 +67,10 @@ class TextureRecord:
 class TextureManager:
     """Copies Java textures into the resource pack and returns atlas keys."""
 
-    def __init__(self, archive: ModArchive, writer: PackWriter) -> None:
+    def __init__(self, archive: ModArchive, writer: PackWriter, reference: ModArchive | None = None) -> None:
         self.archive = archive
+        self.reference = reference
+        self._source_archives: dict[str, ModArchive] = {}
         self.writer = writer
         self.copied: dict[str, str] = {}
         self.records: dict[str, TextureRecord] = {}
@@ -96,10 +98,14 @@ class TextureManager:
         ]
 
     def _locate(self, ref: str) -> tuple[str, bytes] | None:
-        for path in self._candidates(ref):
-            data = self.archive.read(path) if self.archive is not None else None
-            if data:
-                return path, data
+        for archive in (self.archive, self.reference):
+            if archive is None:
+                continue
+            for path in self._candidates(ref):
+                data = archive.read(path)
+                if data:
+                    self._source_archives[path] = archive
+                    return path, data
         return None
 
     @staticmethod
@@ -212,10 +218,18 @@ class TextureManager:
         it. Nothing is invented: the key only exists because
         ``vanilla_texture_key`` recognised the reference.
         """
+        reference = self.records[key].source
+        clean = reference.removeprefix("minecraft:").removeprefix("textures/")
+        source_category = "item" if clean.startswith(("item/", "items/")) else "block"
+        path = vanilla_tile_path(key, source_category)
+        if path is None:
+            path = vanilla_tile_path(key, "block" if source_category == "item" else "item")
+        if path is None:
+            raise ValueError(f"Vanilla tile {key!r} has no documented texture path")
         if category == "item":
-            self.writer.add_item_texture(key, f"{ITEMS_DIR}/{key}")
+            self.writer.add_item_texture(key, path)
         else:
-            self.writer.add_terrain_texture(key, f"{BLOCKS_DIR}/{key}")
+            self.writer.add_terrain_texture(key, path)
 
     def ensure_placeholder(self, key: str, category: str = "item", size: int = 8) -> str:
         """Write a checkerboard PNG and register it, once per key.
@@ -268,7 +282,8 @@ class TextureManager:
     def _note_animation(self, ref: str, source: str, key: str, info: PngInfo) -> None:
         if not info.is_animated_strip or self.archive is None:
             return
-        meta = self.archive.json(f"{source}.mcmeta")
+        source_archive = self._source_archives.get(source, self.archive)
+        meta = source_archive.json(f"{source}.mcmeta")
         ticks = 1
         frames: list[int] | None = None
         blend = True
@@ -288,7 +303,7 @@ class TextureManager:
                 if resolved:
                     frames = resolved
         entry: dict[str, Any] = {
-            "flipbook_texture": f"{BLOCKS_DIR}/{key}" if info is not None else f"{BLOCKS_DIR}/{key}",
+            "flipbook_texture": self.records[key].path.removesuffix(".png"),
             "atlas_tile": key,
             "ticks_per_frame": ticks,
             "blend_frames": blend,

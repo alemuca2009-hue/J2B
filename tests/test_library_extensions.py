@@ -152,7 +152,7 @@ class TextureAtlasTests(unittest.TestCase):
         key = self.manager.copy("minecraft:block/oak_planks", "block")
         self.assertEqual(key, "oak_planks")
         self.assertIn("oak_planks", self._terrain())
-        self.assertEqual(self._terrain()["oak_planks"], "textures/blocks/oak_planks")
+        self.assertEqual(self._terrain()["oak_planks"], "textures/blocks/planks_oak.png")
         # Borrowed, never copied: the pack must not redistribute Mojang art.
         self.assertFalse((self.writer.rp / "textures/blocks/oak_planks.png").exists())
 

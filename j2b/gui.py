@@ -67,6 +67,22 @@ def launch() -> int:
 
     ttk.Button(picker, text="Choose mod…", command=choose).pack(side="right")
 
+    reference = ttk.Frame(root, padding=(16, 6))
+    reference.pack(fill="x")
+    reference_var = tk.StringVar()
+    ttk.Label(reference, text="Reference jar / resource ZIP (optional)").pack(side="left")
+    ttk.Entry(reference, textvariable=reference_var).pack(side="left", fill="x", expand=True, padx=8)
+
+    def choose_reference() -> None:
+        chosen = filedialog.askopenfilename(
+            title="Select Java reference models and textures",
+            filetypes=[("Java resources", "*.jar *.zip"), ("All files", "*.*")],
+        )
+        if chosen:
+            reference_var.set(chosen)
+
+    ttk.Button(reference, text="Browse…", command=choose_reference).pack(side="right")
+
     options = ttk.Frame(root, padding=(16, 6))
     options.pack(fill="x")
     pack_name_var = tk.StringVar()
@@ -113,6 +129,7 @@ def launch() -> int:
             make_mcaddon=mcaddon_var.get(),
             record_learning=learning_var.get(),
             machine_stations=machines_var.get(),
+            vanilla_path=reference_var.get().strip(),
         )
         converter = Converter(
             options=options_value,

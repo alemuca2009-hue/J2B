@@ -7,6 +7,15 @@ Continue-from-here file. If a session ends, this is the first thing to read.
 
 ## P1 animation
 
+Resource resolution update on the same branch fixes child-over-parent precedence and unqualified
+parent namespaces, restricts vanilla templates to Minecraft, and registers borrowed textures with
+official atlas paths. Reference jars/ZIPs now supply PNGs as well as models, accessible in the GUI
+and through `--reference`. Mod assets have priority. Four regression tests cover inheritance,
+missing custom models, reference pixel copying and item textures used on blocks.
+Validation after these changes is 180 tests and 288 subtests. In-game visual checks remain pending.
+The executable committed at the repository root predates these source changes and remains under
+the Defender investigation documented in `Windows-Defender-Fix`.
+
 The scanner finds `*.animation.json` under each asset namespace and reports each named clip
 separately. The output path and identifier are in the report. The client entity still needs a
 binding and playback conditions. The converter preserves supported position, rotation and scale

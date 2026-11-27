@@ -253,6 +253,7 @@ def vanilla_tile_path(key: str, category: str = "block") -> str | None:
     ``warped_planks`` under ``textures/blocks/huge_fungus/``, so a pack that
     declares ``textures/blocks/warped_planks`` points at nothing.
     """
+    _official_tiles()
     return _OFFICIAL_PATHS.get(f"{'item' if category == 'item' else 'block'}:{key}")
 
 

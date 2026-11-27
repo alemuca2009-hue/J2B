@@ -170,7 +170,7 @@ class Converter:
             )
             ctx = ConversionContext(
                 writer=writer,
-                textures=TextureManager(archive, writer),
+                textures=TextureManager(archive, writer, vanilla),
                 options=self.options,
                 mod_id=result.mod.mod_id,
                 archive=archive,

@@ -35,6 +35,14 @@ Nothing is invented. If a texture is missing from the jar, the block still gener
 
 ## Measured on a real mod
 
+To supply missing Java models and textures, select **Reference jar / resource ZIP** in the UI,
+or run `python -m j2b convert mod.jar --reference reference.jar -o output`.
+Use a reference matching the mod's Minecraft version. Files supplied by the mod take priority.
+Missing PNGs found in the reference are copied into the generated resource pack. Otherwise,
+recognized vanilla textures borrow their documented Bedrock paths and can reflect active resource packs.
+Java resource ZIPs must contain `assets/<namespace>/models/` or `assets/<namespace>/textures/`.
+
+
 Create 6.0.10 for 1.21.1, converted end to end (`28 890` features detected, ~9 s, no network access):
 
 | | blocks | geometries | permutations | dangling atlas refs | validation errors | estimated fidelity |

@@ -176,6 +176,7 @@ class ModelResolver:
         textures: dict[str, str] = {}
         current_ns, current_path = namespace, path
         found_elements = False
+        found_ao = False
 
         while True:
             key = f"{current_ns}:{current_path}"
@@ -191,7 +192,7 @@ class ModelResolver:
 
             model = self._load(current_ns, current_path)
             if model is None:
-                template = VANILLA_TEMPLATES.get(f"{current_ns}:{current_path}") or VANILLA_TEMPLATES.get(current_path)
+                template = VANILLA_TEMPLATES.get(current_path) if current_ns == "minecraft" else None
                 if template is not None:
                     result.template = f"{current_ns}:{current_path}"
                     self.template_hits.add(result.template)
@@ -212,14 +213,15 @@ class ModelResolver:
                 self.vanilla_hits.add(key)
             for name, value in (model.get("textures") or {}).items():
                 if isinstance(value, str):
-                    textures[name] = value
-            if model.get("ambientocclusion") is False:
-                result.ambient_occlusion = False
-            if isinstance(model.get("gui_light"), str):
+                    textures.setdefault(name, value)
+            if isinstance(model.get("ambientocclusion"), bool) and not found_ao:
+                result.ambient_occlusion = model["ambientocclusion"]
+                found_ao = True
+            if isinstance(model.get("gui_light"), str) and not result.gui_light:
                 result.gui_light = model["gui_light"]
             if isinstance(model.get("display"), dict):
-                result.display = {**result.display, **model["display"]}
-            if isinstance(model.get("elements"), list) and model["elements"] and not found_elements:
+                result.display = {**model["display"], **result.display}
+            if isinstance(model.get("elements"), list) and not found_elements:
                 result.elements = model["elements"]
                 result.element_source = f"vanilla:{key}" if origin == "vanilla" else key
                 found_elements = True
@@ -227,7 +229,7 @@ class ModelResolver:
             parent = model.get("parent")
             if not isinstance(parent, str) or not parent.strip():
                 break
-            current_ns, current_path = normalise(parent, current_ns)
+            current_ns, current_path = normalise(parent, "minecraft")
 
         result.raw_textures = dict(textures)
         result.textures, unresolved = _dereference(textures)

@@ -34,6 +34,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         pack_name=args.pack_name or "",
         make_mcaddon=not args.no_mcaddon,
         record_learning=not args.no_learning,
+        vanilla_path=getattr(args, "reference", "") or "",
         report_formats=tuple(part for part in args.reports.split(",") if part),
         machine_stations=not getattr(args, "no_machine_stations", False),
         machine_workbench=getattr(args, "machine_workbench", False),
@@ -216,6 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("mod")
     convert.add_argument("-o", "--output", default="j2b_output")
     convert.add_argument("--pack-name", default="")
+    convert.add_argument("--reference", default="", help="Java reference jar/zip supplying missing models and textures")
     convert.add_argument("--no-mcaddon", action="store_true")
     convert.add_argument("--no-learning", action="store_true")
     convert.add_argument(
