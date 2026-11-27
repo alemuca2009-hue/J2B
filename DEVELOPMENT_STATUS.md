@@ -2,12 +2,33 @@
 
 Continue-from-here file. If a session ends, this is the first thing to read.
 
-**Version:** 1.4.0
-**Branch:** `main`
-**Tests:** 161 tests, 259 subtests — all green (`python -m pytest -q`, ~0.4 s)
-**Windows build:** workflow green on `windows-latest` (run 45880077117, v1.2.1). One-file exe
-12.2 MB and portable folder both passed every self-test probe, including a conversion run inside
-the frozen process. Artifacts are on the run; v1.3.0 is the first tag cut with the geometry fix.
+**Base release:** v1.4.1 (`2447d67`). The release includes the Windows executable and portable ZIP.
+**Working branch:** `feature/geckolib-entity-animations`
+
+## P1 animation
+
+The scanner finds `*.animation.json` under each asset namespace and reports each named clip
+separately. The output path and identifier are in the report. The client entity still needs a
+binding and playback conditions. The converter preserves supported position, rotation and scale
+tracks, numeric keyframes and a shared subset of MoLang. A custom curve falls back to linear
+interpolation. An unsupported expression drops its channel and the report identifies the loss.
+
+Position values stay in model units. GeckoLib's keyframe loader reads them directly, and its
+renderer divides by 16 when applying the translation to the render matrix. Both source links
+are pinned in the animation knowledge entry.
+
+**Verification:** 176 tests and 288 subtests pass on Python 3.12. The entity resources in
+[GeckoLib's 1.21.1 examples](https://github.com/bernie-g/geckolib-examples/tree/841c1ee4584d65033fa04bf07d4535aafcadd015/common/src/main/resources/assets/examplemod/animations/entity)
+contain 52 clips. Converting those files produced 41 exact clip definitions, 10 approximate ones
+and one skipped empty source. All 51 definitions read back from the bundled `.mcaddon` passed
+[Blockception's actor animation schema](https://github.com/Blockception/Minecraft-bedrock-json-schemas/blob/af82975a5b25d64373e4a4c5fd4d76c2ff774fa5/resource/animations/actor_animation.json).
+These checks cover exported data. In-game playback has not been tested.
+
+## Last changes (1.4.1)
+
+`tests/test_geometry_blockbench_oracle.py` pins cube origin, size, pivot and rotation to
+Blockbench's compiler. The earlier vertex harness used an assumed Bedrock transform and its
+numerical fidelity results were withdrawn.
 
 ## Last changes (1.4.0)
 
@@ -61,18 +82,17 @@ a missing feature.
 
 1. **Two arbitrary angles at different points** cannot be expressed in Bedrock's single-axis cube
    rotation. `best_coordinate_rotation` picks the nearest turn and reports the error in degrees.
-2. **`rescale`** on a Java element has no Bedrock equivalent; the cube keeps its authored size.
+2. **Java element rescale** is folded into the box bounds about the authored rotation origin.
 3. **Rotated cubes get no AO.** Shading is computed from the unrotated box. Format limitation.
 4. **Collision boxes** are not claimed for rotated cubes (they are not axis-aligned).
 5. **Cylinders / free polygons** from Create and Valkyrien are not converted.
 6. **Machines lose kinetic behaviour** (stress, speed, processing time, chance byproducts).
-7. **Entity behaviour** is not converted: geometry and texture only.
+7. **Entity behaviour** still requires a manual Bedrock definition and playback controller.
 
 ## Next task
 
-`ROADMAP.md` → **P1: audio**. `sounds.json` + `.ogg` → `sound_definitions.json` + `sounds/`
-is the largest remaining chunk of fidelity that is fully mechanical -- no guessing, no
-approximation. Then P1 animation, then P2 parallel conversion.
+The remaining P1 item in `ROADMAP.md` is handheld item models and display transforms.
+P2 tracks parallel conversion.
 
 ## Rules this repo follows
 

@@ -44,7 +44,7 @@ class ConversionFixture(unittest.TestCase):
     # -- scanning ---------------------------------------------------------
     def test_scan_finds_each_kind(self) -> None:
         kinds = {feature.kind for feature in self.result.features}
-        self.assertEqual(kinds, {"block", "item", "recipe", "entity", "worldgen", "gui", "mechanic", "sound"})
+        self.assertEqual(kinds, {"block", "item", "recipe", "entity", "animation", "worldgen", "gui", "mechanic", "sound"})
 
     def test_metadata_read(self) -> None:
         self.assertEqual(self.result.mod.mod_id, "testmod")

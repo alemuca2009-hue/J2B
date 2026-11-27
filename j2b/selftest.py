@@ -126,6 +126,9 @@ def _conversion() -> tuple[bool, str]:
         blocks = list((paths.bp / "blocks").glob("*.json"))
         if not blocks:
             return False, "the behavior pack has no block definitions"
+        if not any(feature.strategy == "animation_exact" and feature.outputs
+                   and (paths.root / feature.outputs[0]).is_file() for feature in result.features):
+            return False, "the resource pack has no converted fixture animation"
         if converted < 3:
             return False, f"only {converted} features converted from the fixture jar"
         return True, f"{converted} converted, {len(blocks)} blocks, {size // 1024} KB bundle"

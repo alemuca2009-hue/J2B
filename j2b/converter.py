@@ -13,6 +13,7 @@ from .analyzer.tags import TagIndex
 from .converters import (
     ConversionContext,
     PackWriter,
+    convert_animation,
     convert_block,
     convert_entity_feature,
     convert_item,
@@ -62,6 +63,8 @@ class Converter:
             convert_recipe(feature, ctx)
         elif feature.kind == "entity":
             convert_entity_feature(feature, ctx)
+        elif feature.kind == "animation":
+            convert_animation(feature, ctx)
         elif feature.kind == "worldgen":
             convert_worldgen(feature, ctx)
         elif feature.kind == "sound":

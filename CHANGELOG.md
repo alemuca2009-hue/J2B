@@ -3,6 +3,15 @@
 All notable changes to J2B Studio. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning is [semantic](https://semver.org/).
 
+## Unreleased
+
+- Convert GeckoLib bone animation clips to Bedrock resource-pack definitions. Reports identify
+  exact and approximate clips, omitted fields and the output used for client-entity binding.
+
+## [1.4.1] — 2026-11-26
+
+- Pin cube coordinates and rotation signs to Blockbench's compiler in the geometry regression tests.
+
 ## [1.4.0] — 2026-11-26
 
 ### Added

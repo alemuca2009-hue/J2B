@@ -26,6 +26,7 @@ python -m j2b convert mods/ruby.jar -o out
 | Ore configured + placed feature | BP `ore_feature` + `feature_rules` | **converted** |
 | Tree / structure / biome worldgen | — | **manual** — must be rebuilt |
 | Entity with a GeckoLib or `.bbmodel` file | RP geometry + texture | **partial** — bones and UVs are the author's; health, hitbox, loot and AI are code |
+| GeckoLib bone animation (`*.animation.json`) | One RP animation file per usable clip | **converted** for supported tracks, **partial** when a curve, expression or event needs manual work. The report gives the identifier to bind in the client entity. |
 | Entity whose model exists only as a Java class | texture copied as reference | **manual** — nothing to translate |
 | GUI screen / menu, command, keybind, particle, dimension | — | **manual / unsupported** |
 

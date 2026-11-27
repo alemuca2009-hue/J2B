@@ -1,3 +1,4 @@
+from .animations import convert_animation
 from .blocks import convert_block
 from .context import ConversionContext
 from .entities import convert_entity_feature
@@ -10,6 +11,7 @@ from .worldgen import convert_worldgen
 __all__ = [
     "ConversionContext",
     "PackWriter",
+    "convert_animation",
     "convert_block",
     "convert_item",
     "convert_recipe",

@@ -17,8 +17,9 @@ Ordered by what blocks a usable release, then by how much fidelity each item buy
 
 - [x] **Entity models.** Java `geo`/`bbmodel` → Bedrock `geometry` with bones. Done in 1.3.0:
       GeckoLib passthrough, `.bbmodel` outliner → bones, models matched to entities by filename.
-- [ ] **Animations.** Java `.json` entity animations → Bedrock `animations` block. Keyframe and
-      molang translation; partial coverage is fine if each animation is marked exact/approximate.
+- [x] **Animation clips.** GeckoLib bone tracks → Bedrock resource-pack animations, with an
+      exact/approximate verdict per exported clip. Custom easing, events and unsupported MoLang
+      are reported. Client-entity bindings and Java controller logic remain manual.
 - [x] **Audio.** `sounds.json` + `.ogg` → `sound_definitions.json` + `sounds/`. Done in 1.4.0:
       names rewritten to file paths, categories mapped onto Bedrock's enum, `event` entries and
       subtitles reported.

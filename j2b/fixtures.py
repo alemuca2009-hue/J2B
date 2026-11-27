@@ -134,6 +134,13 @@ def build(path: str | Path) -> Path:
             }
         ),
         "data/testmod/worldgen/configured_feature/ruby_tree.json": json.dumps({"type": "minecraft:tree", "config": {}}),
+        "assets/testmod/animations/ruby_golem.animation.json": json.dumps({
+            "format_version": "1.8.0",
+            "animations": {"rise": {"animation_length": 1, "bones": {
+                "body": {"position": {"0": [0, 0, 0], "1": [0, 16, 0]},
+                         "rotation": [0, "math.sin(query.anim_time * 360)", 0]},
+            }}},
+        }),
         # Sound: one plain definition with two variants, one that points at
         # another *event* (no Bedrock form) and one on a Java category Bedrock
         # does not have.

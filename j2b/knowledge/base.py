@@ -48,7 +48,7 @@ RECIPE_KINDS = {
 # against the hand-written fallback table: later layers are corrections.
 ORIGIN_BONUS = {"overlay": 0.06, "bundled": 0.03, "builtin": 0.0}
 
-VALID_KINDS = ("block", "item", "recipe", "entity", "worldgen", "gui", "mechanic")
+VALID_KINDS = ("block", "item", "recipe", "entity", "animation", "worldgen", "gui", "mechanic")
 VALID_OUTCOMES = ("converted", "partial", "manual", "unsupported")
 
 # (token, needles in the Java model parent). The model parent is what decides

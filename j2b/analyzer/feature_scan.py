@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 from ..models import Feature, Issue, ModMetadata, ScanResult
-from ..utils import read_json, split_id
+from ..utils import read_json, slugify, split_id
 from .mod_archive import ModArchive
 
 CLASS_HINTS = (
@@ -68,6 +68,7 @@ class ModScanner:
         self._lang: dict[str, str] = {}
         self._block_ids: set[str] = set()
         self._item_ids: set[str] = set()
+        self._animation_ids: set[str] = set()
 
     # -- entry point ------------------------------------------------------
     def scan(self) -> ScanResult:
@@ -78,6 +79,7 @@ class ModScanner:
             self._scan_recipes(namespace)
             self._scan_worldgen(namespace)
             self._scan_entities(namespace)
+            self._scan_animations(namespace)
             self._scan_sounds(namespace)
         self._scan_classes()
         self._scan_pack_declaration()
@@ -281,11 +283,50 @@ class ModScanner:
         models: list[str] = []
         for name in self.archive.names(f"assets/{namespace}/"):
             lowered = name.lower()
+            if lowered.endswith(".animation.json"):
+                continue
             if lowered.endswith((".geo.json", ".bbmodel")) or (
                 lowered.endswith(".json") and "/models/entity/" in lowered
             ):
                 models.append(name)
         return models
+
+    def _scan_animations(self, namespace: str) -> None:
+        prefix = f"assets/{namespace}/"
+        for path in sorted(self.archive.names(prefix)):
+            if not path.lower().endswith(".animation.json"):
+                continue
+            document = self.archive.json(path) or {}
+            clips = document.get("animations")
+            # Keep an unreadable file visible even in a jar that has no other assets.
+            if not isinstance(clips, dict):
+                clips = {"": None}
+            relative = path[len(prefix):-len(".animation.json")].removeprefix("animations/")
+            stem = f"{slugify(namespace)[:48]}.{slugify(relative)[:60]}"
+            if stem[0].isdigit():
+                stem = f"ns_{stem}"
+            for name, clip in sorted(clips.items()):
+                base = f"{stem}.{slugify(name.removeprefix('animation.'), 'clip')[:60]}"
+                key = base
+                suffix = 1
+                while key in self._animation_ids:
+                    suffix += 1
+                    key = f"{base}_{suffix}"
+                self._animation_ids.add(key)
+                self.features.append(
+                    Feature(
+                        id=f"{namespace}:animation:{key}",
+                        kind="animation",
+                        name=name,
+                        display=name or path,
+                        source=path,
+                        data={
+                            "clip": clip,
+                            "identifier": f"animation.{key}",
+                            "format_version": document.get("format_version"),
+                        },
+                    )
+                )
 
     # -- sound ------------------------------------------------------------
     def _scan_sounds(self, namespace: str) -> None:
